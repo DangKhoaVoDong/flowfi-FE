@@ -1,0 +1,6 @@
+{
+  "name": "FlowFi - Quản lý Tài chính & Admin Portal",
+  "description": "Nền tảng Quản lý Tài chính cá nhân & Cổng Quản trị Admin FlowFi chuẩn thiết kế 8 màn hình.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
