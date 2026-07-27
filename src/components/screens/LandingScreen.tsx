@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { ScreenId } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 import { 
-  Bell, ArrowRight, Sparkles, Wallet, Cpu, Calendar, ShieldCheck, 
-  CheckCircle2, Building2, TrendingUp, ChevronRight, Download, Smartphone 
+  Sparkles, Wallet, Cpu, Calendar, 
+  CheckCircle2, ChevronRight, Loader2, TrendingUp, Bell, Download, Smartphone
 } from 'lucide-react';
 
 interface LandingScreenProps {
@@ -10,53 +11,77 @@ interface LandingScreenProps {
 }
 
 export const LandingScreen: React.FC<LandingScreenProps> = ({ onNavigate }) => {
-  const [email, setEmail] = useState('example@email.com');
-  const [password, setPassword] = useState('••••••••');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { login, register, isLoading, error, clearError } = useAuth();
+  
+  // Form state
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isLoginMode, setIsLoginMode] = useState(false); // Default to register mode
+  const [localError, setLocalError] = useState('');
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoggedIn(true);
-    setTimeout(() => {
-      onNavigate('dashboard');
-    }, 600);
+    clearError();
+    setLocalError('');
+
+    // Validation
+    if (!email || !password) {
+      setLocalError('Vui lòng điền đầy đủ thông tin');
+      return;
+    }
+
+    if (!isLoginMode) {
+      // Register mode
+      if (password !== confirmPassword) {
+        setLocalError('Mật khẩu xác nhận không khớp');
+        return;
+      }
+      if (password.length < 6) {
+        setLocalError('Mật khẩu phải có ít nhất 6 ký tự');
+        return;
+      }
+      if (!fullName.trim()) {
+        setLocalError('Vui lòng nhập họ tên');
+        return;
+      }
+
+      try {
+        await register({ email, password, fullName });
+        onNavigate('dashboard');
+      } catch {
+        // Error handled by context
+      }
+    } else {
+      // Login mode
+      try {
+        await login({ email, password });
+        onNavigate('dashboard');
+      } catch {
+        // Error handled by context
+      }
+    }
   };
+
+  const displayError = localError || error;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans flex flex-col">
-      {/* Top Header */}
-      <header className="bg-white/90 backdrop-blur-md border-b border-slate-100 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      {/* Minimal Header */}
+      <header className="bg-white/90 backdrop-blur-md border-b border-slate-100">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-black text-sm shadow-md shadow-blue-500/20">
               F
             </div>
             <span className="font-extrabold text-xl tracking-tight text-slate-900">FLOWFI</span>
           </div>
-
-          <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-            <a href="#home" className="text-blue-600 font-semibold">Trang chủ</a>
-            <a href="#guide" className="hover:text-slate-900 transition-colors">Hướng dẫn</a>
-            <a href="#features" className="hover:text-slate-900 transition-colors">Tính năng</a>
-          </nav>
-
-          <div className="flex items-center gap-3">
-            <button className="p-2 text-slate-500 hover:text-slate-900 rounded-full hover:bg-slate-100 transition-colors relative">
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-600 rounded-full"></span>
-            </button>
-            <button
-              onClick={() => onNavigate('dashboard')}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium text-sm rounded-xl transition-all shadow-sm shadow-blue-200"
-            >
-              Bắt đầu ngay
-            </button>
-          </div>
         </div>
       </header>
 
       {/* Hero Section */}
-      <section className="py-16 px-6 max-w-7xl mx-auto w-full grid lg:grid-cols-12 gap-12 items-center">
+      <section className="py-12 px-6 max-w-7xl mx-auto w-full grid lg:grid-cols-12 gap-12 items-center flex-1">
         {/* Left Column Text */}
         <div className="lg:col-span-7 space-y-6">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
@@ -89,15 +114,59 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Right Column Login Card */}
+        {/* Right Column Register Card */}
         <div className="lg:col-span-5">
           <div className="bg-white p-8 rounded-3xl border border-slate-200/80 shadow-xl shadow-slate-200/50">
-            <div className="text-center mb-6">
-              <h2 className="text-2xl font-bold text-slate-900 mb-1">Đăng nhập</h2>
-              <p className="text-xs text-slate-500">Bắt đầu hành trình tài chính của bạn</p>
+            {/* Toggle Login/Register */}
+            <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+              <button
+                onClick={() => { setIsLoginMode(true); clearError(); setLocalError(''); }}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                  isLoginMode ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600'
+                }`}
+              >
+                Đăng nhập
+              </button>
+              <button
+                onClick={() => { setIsLoginMode(false); clearError(); setLocalError(''); }}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                  !isLoginMode ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600'
+                }`}
+              >
+                Đăng ký
+              </button>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-4">
+            <div className="text-center mb-6">
+              <h2 className="text-2xl font-bold text-slate-900 mb-1">
+                {isLoginMode ? 'Chào mừng trở lại' : 'Tạo tài khoản mới'}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {isLoginMode ? 'Đăng nhập để tiếp tục' : 'Đăng ký để bắt đầu'}
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {displayError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 font-medium">
+                  {displayError}
+                </div>
+              )}
+
+              {/* Full Name - Register only */}
+              {!isLoginMode && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Họ và tên</label>
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all bg-slate-50/50"
+                    placeholder="Nguyễn Văn A"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">Email</label>
                 <input
@@ -105,7 +174,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({ onNavigate }) => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all bg-slate-50/50"
-                  placeholder="example@email.com"
+                  placeholder="your.email@example.com"
                   required
                 />
               </div>
@@ -113,7 +182,9 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({ onNavigate }) => {
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="block text-xs font-semibold text-slate-700">Mật khẩu</label>
-                  <a href="#forgot" className="text-xs font-medium text-blue-600 hover:underline">Quên mật khẩu?</a>
+                  {isLoginMode && (
+                    <a href="#forgot" className="text-xs font-medium text-blue-600 hover:underline">Quên mật khẩu?</a>
+                  )}
                 </div>
                 <input
                   type="password"
@@ -125,31 +196,45 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({ onNavigate }) => {
                 />
               </div>
 
+              {/* Confirm Password - Register only */}
+              {!isLoginMode && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Xác nhận mật khẩu</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all bg-slate-50/50"
+                    placeholder="••••••••"
+                  />
+                </div>
+              )}
+
               <button
                 type="submit"
-                className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2"
+                disabled={isLoading}
+                className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold rounded-xl text-sm transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {isLoggedIn ? 'Đang chuyển hướng...' : 'Đăng nhập'}
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang xử lý...</span>
+                  </>
+                ) : (
+                  <span>{isLoginMode ? 'Đăng nhập' : 'Đăng ký'}</span>
+                )}
               </button>
             </form>
 
-            <div className="relative my-6 text-center">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-              <span className="relative bg-white px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">HOẶC</span>
-            </div>
-
-            <button
-              onClick={() => onNavigate('dashboard')}
-              className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-medium rounded-xl text-sm transition-all flex items-center justify-center gap-2 shadow-sm"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-              </svg>
-              <span>Đăng nhập với Google</span>
-            </button>
+            {/* Terms */}
+            {!isLoginMode && (
+              <p className="text-[10px] text-slate-400 text-center mt-4">
+                Bằng việc đăng ký, bạn đồng ý với{' '}
+                <a href="#terms" className="text-blue-600 hover:underline">Điều khoản dịch vụ</a>
+                {' '}và{' '}
+                <a href="#privacy" className="text-blue-600 hover:underline">Chính sách bảo mật</a>
+              </p>
+            )}
           </div>
         </div>
       </section>

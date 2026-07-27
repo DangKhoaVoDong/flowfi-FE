@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ScreenId, Wallet } from '../../types';
-import { 
-  LayoutDashboard, CreditCard, Bot, PieChart, Settings, HelpCircle, 
-  Search, Bell, Plus, ArrowLeftRight, Download, Filter, Calendar, 
-  Cloud, DollarSign, Coffee, ChevronLeft, ChevronRight, CheckCircle2, Clock
+import { useAuth } from '../../context/AuthContext';
+import { walletService, transactionService, tagService, transferService } from '../../services';
+import type { WalletDto, TransactionDto, TagDto, CreateWalletDto } from '../../types/api';
+import {
+  LayoutDashboard, CreditCard, Bot, PieChart, Settings, HelpCircle,
+  Search, Bell, Plus, ArrowLeftRight, Download, Filter, Calendar,
+  Cloud, DollarSign, Coffee, ChevronLeft, ChevronRight, CheckCircle2, Clock,
+  Loader2, Trash2
 } from 'lucide-react';
 
 interface TransactionsWalletsScreenProps {
@@ -11,73 +15,116 @@ interface TransactionsWalletsScreenProps {
 }
 
 export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps> = ({ onNavigate }) => {
+  const { user } = useAuth();
   const [filterType, setFilterType] = useState('Tất cả loại');
   const [filterDate, setFilterDate] = useState('30 ngày qua');
   const [filterWallet, setFilterWallet] = useState('Tất cả thẻ');
   const [showAddWallet, setShowAddWallet] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Wallets data
-  const [wallets, setWallets] = useState<Wallet[]>([
-    {
-      id: 'w-1',
-      name: 'Chase Platinum',
-      type: 'Tiết kiệm chính',
-      balance: 142850,
-      currency: 'VNĐ',
-      color: 'bg-blue-600 text-white',
-      isPrimary: true
-    },
-    {
-      id: 'w-2',
-      name: 'Brex Corporate',
-      type: 'Chi phí vận hành',
-      balance: 28402.15,
-      currency: 'VNĐ',
-      color: 'bg-white border border-slate-200 text-slate-900',
-    },
-    {
-      id: 'w-3',
-      name: 'Coinbase Prime',
-      type: 'Tài sản số',
-      balance: 4.825,
-      currency: 'BTC',
-      color: 'bg-white border border-slate-200 text-slate-900',
-    }
-  ]);
+  // Data from API
+  const [wallets, setWallets] = useState<WalletDto[]>([]);
+  const [transactions, setTransactions] = useState<TransactionDto[]>([]);
+  const [tags, setTags] = useState<TagDto[]>([]);
 
-  // Transactions list
-  const txHistory = [
-    {
-      id: 'h-1',
-      date: '24 thg 10, 2023',
-      vendor: 'Dịch vụ đám mây AWS',
-      sub: 'Chi phí hạ tầng',
-      wallet: 'Brex Corporate',
-      status: 'HOÀN THÀNH',
-      amount: -2140.00,
-      icon: 'cloud'
-    },
-    {
-      id: 'h-2',
-      date: '22 thg 10, 2023',
-      vendor: 'Thanh toán Stripe',
-      sub: 'Doanh thu SaaS',
-      wallet: 'Chase Platinum',
-      status: 'HOÀN THÀNH',
-      amount: 14200.50,
-      icon: 'stripe'
-    },
-    {
-      id: 'h-3',
-      date: '20 thg 10, 2023',
-      vendor: 'Blue Bottle Coffee',
-      sub: 'Chi phí Ăn uống & Đi lại',
-      wallet: 'Brex Corporate',
-      status: 'ĐANG CHỜ',
-      amount: -14.50,
-      icon: 'coffee'
+  // New wallet form state
+  const [newWalletName, setNewWalletName] = useState('');
+  const [newWalletBalance, setNewWalletBalance] = useState('');
+  const [newWalletCurrency, setNewWalletCurrency] = useState('VND');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalTransactions, setTotalTransactions] = useState(0);
+  const pageSize = 10;
+
+  // Fetch data from API
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [walletsRes, transactionsRes, tagsRes] = await Promise.allSettled([
+        walletService.getAll(),
+        transactionService.getAll({
+          page: currentPage,
+          pageSize,
+          type: filterType === 'Chi tiêu' ? 'EXPENSE' : filterType === 'Thu nhập' ? 'INCOME' : undefined,
+        }),
+        tagService.getAll(),
+      ]);
+
+      // Services return data directly (no ApiResponse wrapper)
+      if (walletsRes.status === 'fulfilled') {
+        // walletsRes.value IS the WalletDto[] array directly
+        setWallets(Array.isArray(walletsRes.value) ? walletsRes.value : []);
+      }
+      if (transactionsRes.status === 'fulfilled') {
+        // BE returns PagedTransactionsResponse: { items, page, pageSize, total }
+        const pagedResponse = transactionsRes.value;
+        const items = pagedResponse?.items || [];
+        const total = pagedResponse?.total || 0;
+        setTransactions(Array.isArray(items) ? items : []);
+        setTotalTransactions(typeof total === 'number' ? total : 0);
+      }
+      if (tagsRes.status === 'fulfilled') {
+        // BE returns TagDto[] array directly
+        setTags(Array.isArray(tagsRes.value) ? tagsRes.value : []);
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setIsLoading(false);
     }
-  ];
+  }, [currentPage, filterType]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Mock data for display
+  const txHistory = transactions.map(t => ({
+      id: t.id,
+      date: t.transactionDate ? new Date(t.transactionDate).toLocaleDateString('vi-VN') : '',
+      vendor: t.title || '',
+      sub: t.note || t.tagName || '',
+      wallet: wallets.find(w => w.id === t.walletId)?.name || 'Ví không xác định',
+      status: 'HOÀN THÀNH',
+      amount: t.type === 'EXPENSE' ? -(t.amount ?? 0) : (t.amount ?? 0),
+      icon: t.tagName?.toLowerCase().includes('food') ? 'coffee' : t.type === 'INCOME' ? 'stripe' : 'cloud'
+    }));
+
+  const handleCreateWallet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWalletName) return;
+
+    try {
+      await walletService.create({
+        name: newWalletName,
+        walletType: 'CASH',
+        balance: parseFloat(newWalletBalance) || 0,
+        currency: newWalletCurrency,
+      });
+
+      await fetchData();
+      setShowAddWallet(false);
+      setNewWalletName('');
+      setNewWalletBalance('');
+      setNewWalletCurrency('VND');
+    } catch (error) {
+      console.error('Error creating wallet:', error);
+      alert('Không thể tạo ví. Vui lòng thử lại.');
+    }
+  };
+
+  const handleDeleteWallet = async (walletId: string) => {
+    if (!confirm('Bạn có chắc muốn xóa ví này?')) return;
+
+    try {
+      await walletService.delete(walletId);
+      await fetchData();
+    } catch (error) {
+      console.error('Error deleting wallet:', error);
+      alert('Không thể xóa ví. Vui lòng thử lại.');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#F4F6FA] text-slate-900 font-sans flex">
@@ -112,7 +159,7 @@ export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps>
             className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
           >
             <Bot className="w-4 h-4" />
-            <span>Đầu vào AI</span>
+            <span>Trợ lý AI</span>
           </button>
 
           <button
@@ -144,12 +191,18 @@ export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps>
             <button className="p-2 rounded-full hover:bg-slate-100 text-slate-600 relative">
               <Bell className="w-4 h-4" />
             </button>
-            <img
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100"
-              alt="Alex Rivera"
-              className="w-8 h-8 rounded-full object-cover ring-2 ring-blue-100"
-            />
-            <span className="text-xs font-semibold text-slate-800 hidden sm:inline">Alex Rivera</span>
+            {user?.avatarUrl ? (
+              <img
+                src={user.avatarUrl}
+                alt={user.fullName}
+                className="w-8 h-8 rounded-full object-cover ring-2 ring-blue-100"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold ring-2 ring-blue-100">
+                {user?.fullName?.charAt(0) || 'U'}
+              </div>
+            )}
+            <span className="text-xs font-semibold text-slate-800 hidden sm:inline">{user?.fullName || 'Người dùng'}</span>
           </div>
         </header>
 
@@ -179,25 +232,42 @@ export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps>
 
           {/* Wallets Row */}
           <div className="grid md:grid-cols-3 gap-5">
-            {wallets.map((w) => (
-              <div 
-                key={w.id} 
-                className={`p-6 rounded-2xl shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[150px] ${w.color}`}
+            {wallets.length > 0 ? wallets.map((w, index) => (
+              <div
+                key={w.id}
+                className={`p-6 rounded-2xl shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[150px] ${
+                  index === 0 ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-900'
+                }`}
               >
                 <div>
-                  <p className={`text-xs font-semibold mb-1 ${w.isPrimary ? 'text-blue-100' : 'text-slate-500'}`}>
-                    {w.type}
+                  <p className={`text-xs font-semibold mb-1 ${index === 0 ? 'text-blue-100' : 'text-slate-500'}`}>
+                    {w.currency}
                   </p>
                   <h3 className="text-xl font-bold tracking-tight mb-4">{w.name}</h3>
                 </div>
 
-                <div>
-                  <h2 className="text-2xl font-extrabold tracking-tight">
-                    {w.balance.toLocaleString('vi-VN')} <span className="text-sm font-semibold">{w.currency}</span>
-                  </h2>
+                <div className="flex items-end justify-between">
+                  <div>
+                    <h2 className="text-2xl font-extrabold tracking-tight">
+                      {Number(w.balance).toLocaleString('vi-VN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      <span className="text-sm font-semibold ml-1">{w.currency}</span>
+                    </h2>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteWallet(w.id)}
+                    className={`p-2 rounded-lg transition-colors ${
+                      index === 0 ? 'hover:bg-blue-700 text-blue-100' : 'hover:bg-slate-100 text-slate-400'
+                    }`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="col-span-3 text-center py-12 text-slate-500">
+                <p>Chưa có ví nào. Tạo ví đầu tiên của bạn!</p>
+              </div>
+            )}
           </div>
 
           {/* Advanced History */}
@@ -241,8 +311,9 @@ export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps>
                     className="bg-transparent outline-none cursor-pointer"
                   >
                     <option>Tất cả thẻ</option>
-                    <option>Brex Corporate</option>
-                    <option>Chase Platinum</option>
+                    {wallets.map(w => (
+                      <option key={w.id}>{w.name}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -308,12 +379,25 @@ export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps>
 
             {/* Pagination Footer */}
             <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-              <span>Hiển thị 1-10 của 124 giao dịch</span>
+              <span>
+                {isLoading ? 'Đang tải...' : `Hiển thị ${transactions.length} của ${totalTransactions} giao dịch`}
+              </span>
               <div className="flex items-center gap-1">
-                <button className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1 || isLoading}
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 disabled:opacity-50"
+                >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <button className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600">
+                <span className="px-3 py-1 text-xs font-medium">
+                  Trang {currentPage}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  disabled={transactions.length < pageSize || isLoading}
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 disabled:opacity-50"
+                >
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
@@ -327,13 +411,15 @@ export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps>
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <h3 className="font-bold text-lg text-slate-900">Thêm Ví mới</h3>
-            <div className="space-y-3">
+            <form onSubmit={handleCreateWallet} className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Tên ví / Ngân hàng</label>
                 <input
                   type="text"
                   placeholder="Ví dụ: Vietcombank, Momo..."
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-600"
+                  value={newWalletName}
+                  onChange={(e) => setNewWalletName(e.target.value)}
                 />
               </div>
 
@@ -341,36 +427,32 @@ export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Số dư ban đầu (VNĐ)</label>
                 <input
                   type="number"
-                  placeholder="10000000"
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-600"
+                  value={newWalletBalance}
+                  onChange={(e) => setNewWalletBalance(e.target.value)}
                 />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
-                  onClick={() => setShowAddWallet(false)}
+                  type="button"
+                  onClick={() => {
+                    setShowAddWallet(false);
+                    setNewWalletName('');
+                    setNewWalletBalance('');
+                  }}
                   className="px-4 py-2 border border-slate-200 rounded-xl text-xs text-slate-600"
                 >
                   Hủy
                 </button>
                 <button
-                  onClick={() => {
-                    setWallets([...wallets, {
-                      id: `w-${Date.now()}`,
-                      name: 'Momo Wallet',
-                      type: 'Ví điện tử',
-                      balance: 10000000,
-                      currency: 'VNĐ',
-                      color: 'bg-white border border-slate-200 text-slate-900'
-                    }]);
-                    setShowAddWallet(false);
-                  }}
+                  type="submit"
                   className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-xl text-xs"
                 >
                   Thêm Ví
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}

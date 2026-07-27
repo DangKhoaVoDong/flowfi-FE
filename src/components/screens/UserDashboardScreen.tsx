@@ -1,9 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ScreenId, Transaction } from '../../types';
-import { 
-  LayoutDashboard, CreditCard, Bot, PieChart, Settings, HelpCircle, 
-  Search, Bell, Plus, Wallet, TrendingUp, TrendingDown, MoreHorizontal, 
-  Download, PiggyBank, Award, Landmark, AlertCircle, ShoppingBag, Car, DollarSign, Laptop
+import { useAuth } from '../../context/AuthContext';
+import { walletService, transactionService, summaryService, budgetService, analyticsService, tagService } from '../../services';
+import type { WalletDto, TransactionDto, FinancialSummaryDto, BudgetDto, BudgetProgressDto, TagDto } from '../../types/api';
+import type { CashflowResponse, RatiosResponse } from '../../services/analyticsService';
+import {
+  LayoutDashboard, CreditCard, Bot, PieChart, Settings, HelpCircle,
+  Search, Bell, Plus, Wallet as WalletIcon, TrendingUp, TrendingDown, MoreHorizontal,
+  Download, PiggyBank, Award, Landmark, AlertCircle, ShoppingBag, Car, DollarSign, Laptop,
+  Loader2, Tag, Pencil, Trash2, X, LogOut
 } from 'lucide-react';
 
 interface UserDashboardScreenProps {
@@ -11,71 +16,188 @@ interface UserDashboardScreenProps {
 }
 
 export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavigate }) => {
-  const [activeTab, setActiveTab] = useState<ScreenId>('dashboard');
+  const { user, logout } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [cashflowDays, setCashflowDays] = useState(7);
+
+  // Data from API
+  const [wallets, setWallets] = useState<WalletDto[]>([]);
+  const [transactions, setTransactions] = useState<TransactionDto[]>([]);
+  const [summary, setSummary] = useState<FinancialSummaryDto | null>(null);
+  const [budgets, setBudgets] = useState<BudgetDto[]>([]);
+  const [budgetProgress, setBudgetProgress] = useState<BudgetProgressDto[]>([]);
+  const [cashflow, setCashflow] = useState<CashflowResponse['dailyData']>([]);
+  const [ratios, setRatios] = useState<RatiosResponse | null>(null);
+  const [tags, setTags] = useState<TagDto[]>([]);
 
   // New transaction modal state
   const [newDesc, setNewDesc] = useState('');
   const [newAmount, setNewAmount] = useState('');
   const [newCategory, setNewCategory] = useState('Ăn uống');
+  const [selectedWalletId, setSelectedWalletId] = useState('');
 
-  // Initial transactions from design
-  const [transactions, setTransactions] = useState<Transaction[]>([
-    {
-      id: 'tx-1',
-      date: '24 Th10, 2023',
-      description: 'Siêu thị WinMart',
-      category: 'Ăn uống',
-      amount: -142300,
-      icon: 'shopping'
-    },
-    {
-      id: 'tx-2',
-      date: '23 Th10, 2023',
-      description: 'Chuyến đi Grab',
-      category: 'Di chuyển',
-      amount: -24500,
-      icon: 'car'
-    },
-    {
-      id: 'tx-3',
-      date: '22 Th10, 2023',
-      description: 'Lương tháng',
-      category: 'Lương',
-      amount: 8500000,
-      icon: 'salary'
-    },
-    {
-      id: 'tx-4',
-      date: '21 Th10, 2023',
-      description: 'Cửa hàng Apple',
-      category: 'Công nghệ',
-      amount: -2499000,
-      icon: 'apple'
-    },
-  ]);
+  // Tag CRUD state
+  const [showTagForm, setShowTagForm] = useState(false);
+  const [editingTag, setEditingTag] = useState<TagDto | null>(null);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagType, setNewTagType] = useState('EXPENSE');
+  const [newTagColor, setNewTagColor] = useState('#3B82F6');
 
-  const handleAddTransaction = (e: React.FormEvent) => {
+  // Fetch data from API
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [walletsRes, transactionsRes, summaryRes, budgetsRes, cashflowRes, ratiosRes, tagsRes] = await Promise.allSettled([
+        walletService.getAll(),
+        transactionService.getAll({ pageSize: 10 }),
+        summaryService.getCurrentMonth(),
+        budgetService.getAllProgress(),
+        analyticsService.getDailyCashflow(cashflowDays),
+        analyticsService.getRatios(),
+        tagService.getAll(),
+      ]);
+
+      // Services return data directly (no ApiResponse wrapper)
+      if (walletsRes.status === 'fulfilled') {
+        // walletsRes.value IS the WalletDto[] array directly
+        setWallets(Array.isArray(walletsRes.value) ? walletsRes.value : []);
+        if (Array.isArray(walletsRes.value) && walletsRes.value.length > 0 && !selectedWalletId) {
+          setSelectedWalletId(walletsRes.value[0].id);
+        }
+      }
+      if (transactionsRes.status === 'fulfilled') {
+        // BE returns PagedTransactionsResponse: { items, page, pageSize, total }
+        const pagedResponse = transactionsRes.value;
+        const items = pagedResponse?.items || [];
+        setTransactions(Array.isArray(items) ? items.slice(0, 5) : []);
+      }
+      if (summaryRes.status === 'fulfilled') {
+        // BE returns FinancialSummaryResponse directly
+        setSummary(summaryRes.value || null);
+      }
+      if (budgetsRes.status === 'fulfilled') {
+        // BE returns BudgetProgressResponse[] array directly
+        setBudgetProgress(Array.isArray(budgetsRes.value) ? budgetsRes.value : []);
+      }
+      if (cashflowRes.status === 'fulfilled') {
+        // BE returns CashflowResponse directly: { dailyData, totalIncome, totalExpense, netCashflow }
+        const cashflowResponse = cashflowRes.value;
+        setCashflow(Array.isArray(cashflowResponse?.dailyData) ? cashflowResponse.dailyData : []);
+      }
+      if (ratiosRes.status === 'fulfilled') {
+        setRatios(ratiosRes.value);
+      }
+      if (tagsRes.status === 'fulfilled') {
+        setTags(Array.isArray(tagsRes.value) ? tagsRes.value : []);
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedWalletId, cashflowDays]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Calculate total balance from wallets
+  const totalBalance = (wallets || []).reduce((sum, w) => sum + (Number(w.balance) || 0), 0);
+
+  // Use real data if available
+  const displayTransactions = transactions.length > 0
+    ? transactions.map(t => ({
+        id: t.id,
+        date: t.transactionDate ? new Date(t.transactionDate).toLocaleDateString('vi-VN') : '',
+        description: t.title || '',
+        category: t.tagName || (t.type === 'INCOME' ? 'Thu nhập' : 'Chi tiêu'),
+        amount: t.type === 'EXPENSE' ? -(t.amount ?? 0) : (t.amount ?? 0),
+        icon: 'default'
+      }))
+    : [];
+
+  const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDesc || !newAmount) return;
+    if (!newDesc || !newAmount || !selectedWalletId) return;
 
-    const parsedAmt = parseFloat(newAmount);
-    const newTx: Transaction = {
-      id: `tx-${Date.now()}`,
-      date: 'Hôm nay',
-      description: newDesc,
-      category: newCategory,
-      amount: parsedAmt,
-    };
+    try {
+      const parsedAmt = Math.abs(parseFloat(newAmount));
+      const isExpense = newCategory !== 'Lương';
 
-    setTransactions([newTx, ...transactions]);
-    setNewDesc('');
-    setNewAmount('');
-    setShowAddModal(false);
+      await transactionService.create({
+        walletId: selectedWalletId,
+        amount: parsedAmt,
+        type: isExpense ? 'EXPENSE' : 'INCOME',
+        title: newDesc,
+        source: 'MANUAL',
+        transactionDate: new Date().toISOString(),
+      });
+
+      // Refresh data
+      await fetchData();
+
+      setNewDesc('');
+      setNewAmount('');
+      setShowAddModal(false);
+    } catch (error) {
+      console.error('Error creating transaction:', error);
+      alert('Không thể tạo giao dịch. Vui lòng thử lại.');
+    }
   };
 
-  const filteredTransactions = transactions.filter(t => 
+  // Tag CRUD Handlers
+  const handleCreateTag = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTagName) {
+      alert('Vui lòng nhập tên danh mục.');
+      return;
+    }
+
+    try {
+      if (editingTag) {
+        await tagService.update(editingTag.id, {
+          name: newTagName,
+          type: newTagType,
+          color: newTagColor,
+        });
+      } else {
+        await tagService.create({
+          name: newTagName,
+          type: newTagType,
+          color: newTagColor,
+        });
+      }
+
+      setShowTagForm(false);
+      setEditingTag(null);
+      setNewTagName('');
+      setNewTagType('EXPENSE');
+      setNewTagColor('#3B82F6');
+
+      const tagsRes = await tagService.getAll();
+      setTags(Array.isArray(tagsRes) ? tagsRes : []);
+    } catch (error) {
+      console.error('Error saving tag:', error);
+      alert('Lỗi khi lưu danh mục. Vui lòng thử lại.');
+    }
+  };
+
+  const handleDeleteTag = async (tagId: string) => {
+    if (!confirm('Bạn có chắc muốn xóa danh mục này?')) return;
+
+    try {
+      await tagService.delete(tagId);
+      const tagsRes = await tagService.getAll();
+      setTags(Array.isArray(tagsRes) ? tagsRes : []);
+    } catch (error) {
+      console.error('Error deleting tag:', error);
+      alert('Lỗi khi xóa danh mục. Vui lòng thử lại.');
+    }
+  };
+
+  const filteredTransactions = displayTransactions.filter(t =>
     t.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
     t.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -137,6 +259,18 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
             <HelpCircle className="w-4 h-4" />
             <span>Hỗ trợ</span>
           </button>
+          <button
+            onClick={async () => {
+              if (confirm('Bạn có chắc muốn đăng xuất?')) {
+                await logout();
+                onNavigate('landing');
+              }
+            }}
+            className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-sm font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Đăng xuất</span>
+          </button>
         </div>
       </aside>
 
@@ -169,20 +303,37 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
 
             {/* Avatar */}
             <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-              <img
-                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100"
-                alt="Alex Rivera"
-                className="w-8 h-8 rounded-full object-cover ring-2 ring-blue-100"
-              />
+              {user?.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.fullName}
+                  className="w-8 h-8 rounded-full object-cover ring-2 ring-blue-100"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 font-bold flex items-center justify-center ring-2 ring-blue-100">
+                  {user?.fullName?.charAt(0) || 'U'}
+                </div>
+              )}
             </div>
 
-            {/* Add Transaction Button */}
+            {/* User Name */}
+            <span className="text-xs font-semibold text-slate-800 hidden lg:inline">
+              {user?.fullName || 'Người dùng'}
+            </span>
+
+            {/* Giao dịch mới Button */}
             <button
-              onClick={() => setShowAddModal(true)}
+              onClick={() => {
+                setEditingTag(null);
+                setNewTagName('');
+                setNewTagType('EXPENSE');
+                setNewTagColor('#3B82F6');
+                setShowTagForm(true);
+              }}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-sm shadow-blue-500/20 flex items-center gap-1.5 transition-all"
             >
               <Plus className="w-4 h-4" />
-              <span>Giao dịch mới</span>
+              <span>Thêm tag</span>
             </button>
           </div>
         </header>
@@ -191,22 +342,26 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
         <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
           {/* Welcome subtitle */}
           <p className="text-xs text-slate-500 font-medium -mt-2">
-            Chào mừng bạn trở lại. Sức khỏe tài chính của bạn hôm nay rất ổn định.
+            Chào mừng bạn trở lại{user?.fullName ? `, ${user.fullName}` : ''}.
           </p>
 
           {/* Top 3 Summary Cards */}
           <div className="grid md:grid-cols-3 gap-5">
             {/* Primary Blue Card */}
             <div className="bg-gradient-to-br from-blue-600 to-blue-700 text-white p-6 rounded-2xl shadow-lg shadow-blue-500/15 relative overflow-hidden flex flex-col justify-between min-h-[140px]">
-              <Wallet className="w-24 h-24 text-white/10 absolute -right-4 -bottom-4 pointer-events-none" />
+              <WalletIcon className="w-24 h-24 text-white/10 absolute -right-4 -bottom-4 pointer-events-none" />
               <div>
                 <p className="text-xs font-semibold text-blue-100 mb-1">Tổng số dư</p>
-                <h2 className="text-3xl font-extrabold tracking-tight">124.592.000 đ</h2>
+                <h2 className="text-3xl font-extrabold tracking-tight">
+                  {isLoading ? '...' : Number(totalBalance).toLocaleString('vi-VN')} đ
+                </h2>
               </div>
               <div className="pt-3">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
-                  +2.4% so với tháng trước
-                </span>
+                {summary && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">
+                    {(summary.netSaving ?? 0) >= 0 ? '+' : ''}{(summary.netSaving ?? 0).toLocaleString('vi-VN')} đ tiết kiệm
+                  </span>
+                )}
               </div>
             </div>
 
@@ -219,13 +374,20 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                 </div>
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-slate-900">12.450.000 đ</h2>
-                <div className="mt-3 space-y-1">
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div className="bg-emerald-500 h-full w-[75%]" />
+                <h2 className="text-2xl font-bold text-slate-900">
+                  {isLoading ? '...' : (summary?.totalIncome || 0).toLocaleString('vi-VN')} đ
+                </h2>
+                {summary && (
+                  <div className="mt-3 space-y-1">
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-emerald-500 h-full"
+                        style={{ width: `${Math.min(((summary.totalIncome ?? 0) / (summary.totalBudget || 1)) * 100, 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400">Thu nhập tháng</p>
                   </div>
-                  <p className="text-[11px] text-slate-400">Đạt 75% mục tiêu thu nhập</p>
-                </div>
+                )}
               </div>
             </div>
 
@@ -238,13 +400,22 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                 </div>
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-slate-900">4.821.500 đ</h2>
-                <div className="mt-3 space-y-1">
-                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                    <div className="bg-rose-500 h-full w-[39%]" />
+                <h2 className="text-2xl font-bold text-slate-900">
+                  {isLoading ? '...' : (summary?.totalExpense || 0).toLocaleString('vi-VN')} đ
+                </h2>
+                {summary && (
+                  <div className="mt-3 space-y-1">
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-rose-500 h-full"
+                        style={{ width: `${Math.min((summary.budgetUsagePercent ?? 0), 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {(summary.budgetUsagePercent ?? 0)}% ngân sách
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-400">Đã dùng 39% ngân sách tháng</p>
-                </div>
+                )}
               </div>
             </div>
           </div>
@@ -265,35 +436,37 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                 </select>
               </div>
 
-              {/* Bar Chart Representation */}
+              {/* Bar Chart from API */}
               <div className="h-48 flex items-end justify-between gap-3 px-2 pt-4 border-b border-slate-100 pb-2">
-                {[
-                  { day: 'T2', income: 80, expense: 40 },
-                  { day: 'T3', income: 90, expense: 30 },
-                  { day: 'T4', income: 85, expense: 45 },
-                  { day: 'T5', income: 75, expense: 50 },
-                  { day: 'T6', income: 95, expense: 60 },
-                  { day: 'T7', income: 80, expense: 35 },
-                  { day: 'CN', income: 60, expense: 30 },
-                ].map((item, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-2 group">
-                    <div className="w-full flex items-end justify-center gap-1 h-36">
-                      {/* Income Bar (Light Blue) */}
-                      <div 
-                        style={{ height: `${item.income}%` }} 
-                        className="w-1/2 bg-blue-200 rounded-t-sm group-hover:bg-blue-300 transition-all" 
-                        title={`Thu nhập: ${item.income}`}
-                      />
-                      {/* Expense Bar (Dark Blue) */}
-                      <div 
-                        style={{ height: `${item.expense}%` }} 
-                        className="w-1/2 bg-blue-600 rounded-t-sm group-hover:bg-blue-700 transition-all" 
-                        title={`Chi tiêu: ${item.expense}`}
-                      />
+                {cashflow.length > 0 ? cashflow.map((item, i) => {
+                  const maxValue = Math.max(...cashflow.map(c => Math.max(c.income ?? 0, c.expense ?? 0)));
+                  const incomeHeight = maxValue > 0 ? ((item.income ?? 0) / maxValue) * 100 : 0;
+                  const expenseHeight = maxValue > 0 ? ((item.expense ?? 0) / maxValue) * 100 : 0;
+
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-2 group">
+                      <div className="w-full flex items-end justify-center gap-1 h-36">
+                        <div
+                          style={{ height: `${incomeHeight}%` }}
+                          className="w-1/2 bg-blue-200 rounded-t-sm group-hover:bg-blue-300 transition-all"
+                          title={`Thu nhập: ${(item.income ?? 0).toLocaleString('vi-VN')} đ`}
+                        />
+                        <div
+                          style={{ height: `${expenseHeight}%` }}
+                          className="w-1/2 bg-blue-600 rounded-t-sm group-hover:bg-blue-700 transition-all"
+                          title={`Chi tiêu: ${(item.expense ?? 0).toLocaleString('vi-VN')} đ`}
+                        />
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-400">
+                        {item.date ? new Date(item.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : ''}
+                      </span>
                     </div>
-                    <span className="text-[11px] font-semibold text-slate-400">{item.day}</span>
+                  );
+                }) : (
+                  <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
+                    Chưa có dữ liệu dòng tiền
                   </div>
-                ))}
+                )}
               </div>
 
               <div className="flex items-center justify-center gap-6 pt-4 text-xs font-semibold text-slate-600">
@@ -319,44 +492,37 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                 </div>
 
                 <div className="space-y-4">
-                  {/* Category 1: Giải trí */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-semibold">
-                      <span className="text-slate-800">Giải trí</span>
-                      <span className="text-rose-600 font-bold">92%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-rose-500 h-full w-[92%]" />
-                    </div>
-                    <p className="text-[11px] text-rose-500 flex items-center gap-1 font-medium">
-                      <AlertCircle className="w-3 h-3" />
-                      Còn lại 80.000 đ
-                    </p>
-                  </div>
+                  {budgetProgress.length > 0 ? budgetProgress.slice(0, 3).map((bp) => {
+                    const isOver = bp.isOverBudget;
+                    const percentage = bp.percentUsed;
 
-                  {/* Category 2: Ăn uống */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-semibold">
-                      <span className="text-slate-800">Ăn uống</span>
-                      <span className="text-slate-500">45%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-emerald-500 h-full w-[45%]" />
-                    </div>
-                    <p className="text-[11px] text-slate-400">Đã dùng 1.200k trên 2.500k</p>
-                  </div>
-
-                  {/* Category 3: Nhà ở & Hóa đơn */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-semibold">
-                      <span className="text-slate-800">Nhà ở & Hóa đơn</span>
-                      <span className="text-slate-500">60%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-blue-600 h-full w-[60%]" />
-                    </div>
-                    <p className="text-[11px] text-slate-400">Đã dùng 3.000k trên 5.000k</p>
-                  </div>
+                    return (
+                      <div key={bp.budgetId} className="space-y-1.5">
+                        <div className="flex justify-between text-xs font-semibold">
+                          <span className="text-slate-800">{bp.budgetName}</span>
+                          <span className={isOver ? 'text-rose-600 font-bold' : 'text-slate-500'}>{percentage.toFixed(0)}%</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${isOver ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                            style={{ width: `${Math.min(percentage, 100)}%` }}
+                          />
+                        </div>
+                        <p className={`text-[11px] flex items-center gap-1 font-medium ${isOver ? 'text-rose-500' : 'text-slate-400'}`}>
+                          {isOver ? (
+                            <>
+                              <AlertCircle className="w-3 h-3" />
+                              Vượt: {bp.remainingAmount.toLocaleString('vi-VN')} đ
+                            </>
+                          ) : (
+                            `Còn lại: ${bp.remainingAmount.toLocaleString('vi-VN')} đ`
+                          )}
+                        </p>
+                      </div>
+                    );
+                  }) : (
+                    <p className="text-xs text-slate-400 text-center py-4">Chưa có ngân sách nào</p>
+                  )}
                 </div>
               </div>
 
@@ -385,6 +551,7 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                     <th className="py-3 px-6">Ngày</th>
                     <th className="py-3 px-6">Mô tả</th>
                     <th className="py-3 px-6">Danh mục</th>
+                    <th className="py-3 px-6">Ví</th>
                     <th className="py-3 px-6 text-right">Số tiền</th>
                   </tr>
                 </thead>
@@ -413,6 +580,9 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                             {tx.category}
                           </span>
                         </td>
+                        <td className="py-4 px-6">
+                          <span className="text-xs text-slate-500">{wallets.find(w => w.id === tx.walletId)?.name || '—'}</span>
+                        </td>
                         <td className={`py-4 px-6 text-right font-bold text-sm whitespace-nowrap ${isExpense ? 'text-slate-900' : 'text-emerald-600'}`}>
                           {isExpense ? '' : '+'}{tx.amount.toLocaleString('vi-VN')} đ
                         </td>
@@ -431,31 +601,34 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                 <PiggyBank className="w-4 h-4" />
               </div>
               <p className="text-[11px] font-medium text-slate-500 mb-0.5">Tỷ lệ tiết kiệm</p>
-              <h4 className="text-2xl font-black text-slate-900">32%</h4>
+              <h4 className="text-2xl font-black text-slate-900">{ratios?.savingsRate ?? 0}%</h4>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm text-center">
               <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-2">
                 <Award className="w-4 h-4" />
               </div>
-              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Điểm tín dụng</p>
-              <h4 className="text-2xl font-black text-slate-900">784</h4>
+              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Chi tiêu/TN</p>
+              <h4 className="text-2xl font-black text-slate-900">{ratios?.expenseToIncomeRatio ?? 0}%</h4>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm text-center">
               <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-2">
                 <Landmark className="w-4 h-4" />
               </div>
-              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Giá trị tài sản ròng</p>
-              <h4 className="text-2xl font-black text-slate-900">2.4 tỷ</h4>
+              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Quỹ khẩn cấp</p>
+              <h4 className="text-2xl font-black text-slate-900">{ratios?.emergencyFundRatio ?? 0}x</h4>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm text-center">
               <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-2">
                 <TrendingDown className="w-4 h-4" />
               </div>
-              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Tỷ lệ nợ</p>
-              <h4 className="text-2xl font-black text-slate-900">12%</h4>
+              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Chi tiêu TB/ngày</p>
+              <h4 className="text-2xl font-black text-slate-900">
+                {summary?.averageDailyExpense ? Math.round(summary.averageDailyExpense).toLocaleString('vi-VN') : 0}
+                <span className="text-xs font-normal text-slate-400 ml-1">đ</span>
+              </h4>
             </div>
           </div>
         </main>
@@ -480,15 +653,30 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Số tiền (VNĐ) - Dấu (-) nếu là chi tiêu</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Số tiền (VNĐ)</label>
                 <input
                   type="number"
-                  placeholder="-50000"
+                  placeholder="50000"
                   value={newAmount}
                   onChange={(e) => setNewAmount(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-600"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Ví</label>
+                <select
+                  value={selectedWalletId}
+                  onChange={(e) => setSelectedWalletId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-600"
+                  required
+                >
+                  <option value="">Chọn ví</option>
+                  {wallets.map(w => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -523,6 +711,134 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Tag Form Modal */}
+      {showTagForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-lg text-slate-900">
+                {editingTag ? 'Sửa danh mục' : 'Thêm danh mục mới'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowTagForm(false);
+                  setEditingTag(null);
+                }}
+                className="p-2 rounded-lg hover:bg-slate-100 text-slate-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateTag} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  TÊN DANH MỤC
+                </label>
+                <input
+                  type="text"
+                  value={newTagName}
+                  onChange={(e) => setNewTagName(e.target.value)}
+                  placeholder="Ví dụ: Ăn uống, Di chuyển..."
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  LOẠI
+                </label>
+                <select
+                  value={newTagType}
+                  onChange={(e) => setNewTagType(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                >
+                  <option value="EXPENSE">Chi tiêu</option>
+                  <option value="INCOME">Thu nhập</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  MÀU SẮC
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={newTagColor}
+                    onChange={(e) => setNewTagColor(e.target.value)}
+                    className="w-12 h-10 rounded-lg cursor-pointer border border-slate-200"
+                  />
+                  <input
+                    type="text"
+                    value={newTagColor}
+                    onChange={(e) => setNewTagColor(e.target.value)}
+                    placeholder="#3B82F6"
+                    className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTagForm(false);
+                    setEditingTag(null);
+                  }}
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                >
+                  {editingTag ? 'Lưu thay đổi' : 'Tạo danh mục'}
+                </button>
+              </div>
+            </form>
+
+            {/* Tags List Preview */}
+            {tags.length > 0 && (
+              <div className="pt-4 border-t border-slate-100">
+                <p className="text-xs font-semibold text-slate-500 mb-2">Danh mục hiện có:</p>
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                  {tags.map((tag) => (
+                    <div
+                      key={tag.id}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-white"
+                      style={{ backgroundColor: tag.color || '#3B82F6' }}
+                    >
+                      <span>{tag.name}</span>
+                      <button
+                        onClick={() => {
+                          setEditingTag(tag);
+                          setNewTagName(tag.name);
+                          setNewTagType(tag.type);
+                          setNewTagColor(tag.color || '#3B82F6');
+                          setShowTagForm(true);
+                        }}
+                        className="p-0.5 hover:bg-white/20 rounded"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteTag(tag.id)}
+                        className="p-0.5 hover:bg-white/20 rounded"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
