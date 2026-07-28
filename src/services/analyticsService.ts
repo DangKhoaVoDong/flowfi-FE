@@ -1,6 +1,7 @@
 import { apiClient } from './apiClient';
 import type {
   BudgetDto,
+  BudgetDetailsDto,
   CreateBudgetRequest,
   UpdateBudgetRequest,
   BudgetProgressDto,
@@ -18,6 +19,11 @@ export const budgetService = {
 
   getById: async (id: string): Promise<BudgetDto | null> => {
     const response = await apiClient.get<BudgetDto>(`/api/analytics/budgets/${id}`);
+    return response.data;
+  },
+
+  getDetails: async (id: string): Promise<BudgetDetailsDto | null> => {
+    const response = await apiClient.get<BudgetDetailsDto>(`/api/analytics/budgets/${id}/details`);
     return response.data;
   },
 

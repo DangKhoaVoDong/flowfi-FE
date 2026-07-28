@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ScreenId } from '../../types';
 import { useAuth } from '../../context/AuthContext';
-import { budgetService } from '../../services';
-import type { BudgetDto, BudgetProgressDto } from '../../types/api';
+import { budgetService, tagService } from '../../services';
+import type { BudgetDetailsDto, BudgetDto, BudgetProgressDto, BudgetTargetRequest, TagDto } from '../../types/api';
 import {
   LayoutDashboard, CreditCard, Bot, PieChart, Settings,
   Bell, Plus, Calendar, X, Trash2, Loader2, Pencil, Check
@@ -24,36 +24,58 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
   const [isLoading, setIsLoading] = useState(true);
   const [budgets, setBudgets] = useState<BudgetDto[]>([]);
   const [budgetProgress, setBudgetProgress] = useState<BudgetProgressDto[]>([]);
+  const [budgetDetails, setBudgetDetails] = useState<Record<string, BudgetDetailsDto>>({});
+  const [tags, setTags] = useState<TagDto[]>([]);
 
   // Modal states
   const [showMonthDetailModal, setShowMonthDetailModal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
 
-  // New budget form (chỉ tên + tiền, không có ngày)
-  const [newBudgetName, setNewBudgetName] = useState('');
-  const [newBudgetAmount, setNewBudgetAmount] = useState('');
+  // New budget form
+  const [newBudgetTargets, setNewBudgetTargets] = useState<BudgetTargetRequest[]>([]);
+  const [newTagName, setNewTagName] = useState('');
+  const [showNewTagInput, setShowNewTagInput] = useState(false);
+  const [isCreatingTag, setIsCreatingTag] = useState(false);
+  const [budgetFormError, setBudgetFormError] = useState('');
+  const defaultBudgetName = selectedMonth
+    ? `${VIETNAMESE_MONTHS[selectedMonth - 1]} ${selectedYear}`
+    : '';
 
   // Edit state (dùng chung cho danh sách chính và modal tháng)
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
-  const [editAmount, setEditAmount] = useState('');
 
-  // Trong modal tháng, có thể thêm budget từ danh sách đã có
+  // Create budget modal
   const [showAddBudgetToMonth, setShowAddBudgetToMonth] = useState(false);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [budgetsRes, progressRes] = await Promise.allSettled([
+      const [budgetsRes, progressRes, tagsRes] = await Promise.allSettled([
         budgetService.getAll(),
         budgetService.getAllProgress(),
+        tagService.getAll(),
       ]);
 
       if (budgetsRes.status === 'fulfilled') {
-        setBudgets(Array.isArray(budgetsRes.value) ? budgetsRes.value : []);
+        const loadedBudgets = Array.isArray(budgetsRes.value) ? budgetsRes.value : [];
+        setBudgets(loadedBudgets);
+        const detailsResults = await Promise.allSettled(
+          loadedBudgets.map(budget => budgetService.getDetails(budget.id))
+        );
+        const detailsById: Record<string, BudgetDetailsDto> = {};
+        detailsResults.forEach(result => {
+          if (result.status === 'fulfilled' && result.value) {
+            detailsById[result.value.id] = result.value;
+          }
+        });
+        setBudgetDetails(detailsById);
       }
       if (progressRes.status === 'fulfilled') {
         setBudgetProgress(Array.isArray(progressRes.value) ? progressRes.value : []);
+      }
+      if (tagsRes.status === 'fulfilled') {
+        setTags(Array.isArray(tagsRes.value) ? tagsRes.value.filter(tag => tag.type === 'EXPENSE') : []);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -71,29 +93,35 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
   };
 
   const resetForm = () => {
-    setNewBudgetName('');
-    setNewBudgetAmount('');
+    setNewBudgetTargets(tags.map(tag => ({
+      name: tag.name,
+      targetAmount: 0,
+      tagId: tag.id,
+      tagName: tag.name,
+    })));
+    setNewTagName('');
+    setShowNewTagInput(false);
+    setBudgetFormError('');
   };
 
-  // Tính tháng có budget dựa trên khoảng ngày
+  const openBudgetSetup = (month: number) => {
+    setSelectedMonth(month);
+    setNewBudgetTargets(tags.map(tag => ({
+      name: tag.name,
+      targetAmount: 0,
+      tagId: tag.id,
+      tagName: tag.name,
+    })));
+    setBudgetFormError('');
+    setShowAddBudgetToMonth(true);
+  };
+
+  // Budget mới thuộc đúng một tháng/năm.
   const getMonthsContainingBudget = (budget: BudgetDto): number[] => {
-    const start = new Date(budget.startDate);
-    const end = new Date(budget.endDate);
-    const year = parseInt(selectedYear);
-    const months: number[] = [];
-
-    if (start.getFullYear() > year || end.getFullYear() < year) return months;
-
-    const startMonth = start.getFullYear() === year ? start.getMonth() + 1 : 1;
-    const endMonth = end.getFullYear() === year ? end.getMonth() + 1 : 12;
-
-    for (let m = startMonth; m <= endMonth; m++) {
-      months.push(m);
-    }
-    return months;
+    return budget.year === parseInt(selectedYear) ? [budget.month] : [];
   };
 
-  // Lấy danh sách budget hiển thị trong tháng (chỉ những budget có chứa tháng đó)
+  // Lấy danh sách budget của tháng đang xem.
   const getBudgetsForMonth = (month: number) => {
     return budgets.filter(b => getMonthsContainingBudget(b).includes(month));
   };
@@ -105,7 +133,7 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
     let overCount = 0;
 
     monthBudgets.forEach(b => {
-      totalBudget += b.budgetAmount;
+      totalBudget += b.totalTargetAmount;
       const progress = getProgressForBudget(b.id);
       if (progress) {
         totalSpent += progress.spentAmount;
@@ -116,32 +144,6 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
     return { totalBudget, totalSpent, count: monthBudgets.length, overCount };
   };
 
-  // Tạo budget mới
-  const handleCreateBudget = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newBudgetName || !newBudgetAmount) return;
-
-    try {
-      const startDate = `${currentYear}-01-01`;
-      const endDate = `${currentYear}-12-31`;
-      await budgetService.create({
-        name: newBudgetName,
-        budgetAmount: parseFloat(newBudgetAmount),
-        startDate,
-        endDate,
-        periodType: 'MONTHLY',
-        warningThresholdPercent: 80,
-        currencyCode: 'VND',
-      });
-
-      await fetchData();
-      resetForm();
-    } catch (error) {
-      console.error('Error creating budget:', error);
-      alert('Không thể tạo ngân sách.');
-    }
-  };
-
   // Cập nhật budget
   const handleUpdateBudget = async (budgetId: string) => {
     const budget = budgets.find(b => b.id === budgetId);
@@ -150,12 +152,17 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
     try {
       await budgetService.update(budgetId, {
         name: editName || budget.name,
-        budgetAmount: parseFloat(editAmount) || budget.budgetAmount,
-        startDate: budget.startDate,
-        endDate: budget.endDate,
-        periodType: budget.periodType,
+        month: budget.month,
+        year: budget.year,
         warningThresholdPercent: budget.warningThresholdPercent,
         currencyCode: budget.currencyCode,
+        targets: budget.targets.map(({ tagId, tagName, name, targetAmount }) => ({
+          tagId,
+          tagName,
+          name,
+          targetAmount,
+        })),
+        status: budget.status,
       });
 
       setEditingBudgetId(null);
@@ -180,9 +187,10 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
   // Hiển thị 1 budget card với CRUD (dùng chung)
   const renderBudgetCard = (budget: BudgetDto, inMonthModal = false) => {
     const progress = getProgressForBudget(budget.id);
+    const details = budgetDetails[budget.id];
     const isOver = progress?.isOverBudget || false;
-    const spent = progress?.spentAmount || 0;
-    const percent = budget.budgetAmount > 0 ? Math.round((spent / budget.budgetAmount) * 100) : 0;
+    const spent = details?.spentAmount ?? progress?.spentAmount ?? 0;
+    const percent = budget.totalTargetAmount > 0 ? Math.round((spent / budget.totalTargetAmount) * 100) : 0;
 
     if (editingBudgetId === budget.id) {
       return (
@@ -192,13 +200,6 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             placeholder="Tên ngân sách"
-            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
-          />
-          <input
-            type="number"
-            value={editAmount}
-            onChange={(e) => setEditAmount(e.target.value)}
-            placeholder="Số tiền"
             className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
           />
           <div className="flex gap-2">
@@ -226,7 +227,7 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
           <div className="flex-1">
             <h4 className="font-semibold text-slate-800">{budget.name}</h4>
             <p className="text-lg font-bold text-slate-900">
-              {budget.budgetAmount.toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
+              {budget.totalTargetAmount.toLocaleString('vi-VN')} <span className="text-xs font-normal text-slate-500">đ</span>
             </p>
           </div>
           <div className="flex items-center gap-1">
@@ -234,7 +235,6 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
               onClick={() => {
                 setEditingBudgetId(budget.id);
                 setEditName(budget.name);
-                setEditAmount(budget.budgetAmount.toString());
               }}
               className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
               title="Sửa"
@@ -266,10 +266,46 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
           </div>
           {isOver && (
             <p className="text-xs text-rose-500 font-medium">
-              Đã vượt {Math.abs(spent - budget.budgetAmount).toLocaleString('vi-VN')} đ
+              Đã vượt {Math.abs(spent - budget.totalTargetAmount).toLocaleString('vi-VN')} đ
             </p>
           )}
         </div>
+
+        {inMonthModal && (
+          <div className="mt-4 pt-4 border-t border-slate-100 space-y-3">
+            <p className="text-xs font-semibold text-slate-600">Tiến trình theo mục tiêu</p>
+            {(details?.targets ?? budget.targets).map(target => {
+              const targetSpent = 'spentAmount' in target ? target.spentAmount : 0;
+              const targetPercent = target.targetAmount > 0
+                ? Math.round((targetSpent / target.targetAmount) * 100)
+                : 0;
+              const targetOver = targetSpent > target.targetAmount;
+
+              return (
+                <div key={target.id} className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="font-medium text-slate-700 truncate">
+                      {target.tagName || target.name}
+                    </span>
+                    <span className={targetOver ? 'font-semibold text-rose-600' : 'text-slate-500'}>
+                      {targetSpent.toLocaleString('vi-VN')} / {target.targetAmount.toLocaleString('vi-VN')} đ
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                    <div
+                      style={{ width: `${Math.min(targetPercent, 100)}%` }}
+                      className={`h-full transition-all ${targetOver ? 'bg-rose-500' : 'bg-blue-500'}`}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[11px] text-slate-400">
+                    <span>Còn lại: {Math.max(0, target.targetAmount - targetSpent).toLocaleString('vi-VN')} đ</span>
+                    <span className={targetOver ? 'text-rose-500 font-semibold' : ''}>{targetPercent}%</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -402,7 +438,7 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
                   return (
                     <div
                       key={month}
-                      onClick={() => { setSelectedMonth(month); setShowMonthDetailModal(true); setShowAddBudgetToMonth(true); }}
+                      onClick={() => { setShowMonthDetailModal(true); openBudgetSetup(month); }}
                       className="border-2 border-dashed border-slate-200 rounded-2xl p-5 flex flex-col items-center justify-center text-center space-y-2 bg-slate-50/40 hover:bg-slate-100 hover:border-blue-400 transition-all cursor-pointer min-h-[180px]"
                     >
                       <Calendar className="w-6 h-6 text-slate-400" />
@@ -488,7 +524,7 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
               </h2>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setShowAddBudgetToMonth(true)}
+                  onClick={() => openBudgetSetup(selectedMonth)}
                   className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center gap-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -544,129 +580,191 @@ export const BudgetRoadmapScreen: React.FC<BudgetRoadmapScreenProps> = ({ onNavi
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0">
-              <h2 className="text-lg font-bold text-slate-900">Thêm vào {VIETNAMESE_MONTHS[selectedMonth - 1]}</h2>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Thiết lập ngân sách</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {VIETNAMESE_MONTHS[selectedMonth - 1]} {selectedYear}
+                </p>
+              </div>
               <button onClick={() => setShowAddBudgetToMonth(false)} className="p-1 hover:bg-slate-100 rounded-lg">
                 <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 space-y-2">
-              {budgets.length === 0 ? (
-                <div className="text-center py-10 text-slate-400">
-                  <p>Bạn chưa tạo ngân sách nào.</p>
-                  <p className="text-xs mt-1">Đóng và tạo ngân sách trước nhé.</p>
-                </div>
-              ) : (
-                budgets.map(budget => {
-                  const alreadyInMonth = getBudgetsForMonth(selectedMonth).some(b => b.id === budget.id);
-                  const monthsCovered = getMonthsContainingBudget(budget);
-                  const inThisMonth = monthsCovered.includes(selectedMonth);
-
-                  return (
-                    <div
-                      key={budget.id}
-                      className={`p-3 rounded-xl border ${alreadyInMonth ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-200 hover:border-blue-300'} transition-all`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-slate-800">{budget.name}</h4>
-                          <p className="text-xs text-slate-500">
-                            {budget.budgetAmount.toLocaleString('vi-VN')} đ
-                          </p>
-                          {!inThisMonth && !alreadyInMonth && (
-                            <p className="text-xs text-amber-500 mt-1">
-                              ⚠ Budget này không có tháng {selectedMonth}
-                            </p>
-                          )}
-                        </div>
-                        {alreadyInMonth ? (
-                          <span className="text-xs text-slate-400 font-medium">Đã có</span>
-                        ) : (
-                          <button
-                            onClick={async () => {
-                              // Gọi update để thêm tháng vào khoảng ngày
-                              try {
-                                const start = new Date(budget.startDate);
-                                const end = new Date(budget.endDate);
-                                const targetYear = parseInt(selectedYear);
-                                const newStart = new Date(Math.min(start.getTime(), new Date(targetYear, selectedMonth - 1, 1).getTime()));
-                                const newEnd = new Date(Math.max(end.getTime(), new Date(targetYear, selectedMonth, 0).getTime()));
-
-                                await budgetService.update(budget.id, {
-                                  name: budget.name,
-                                  budgetAmount: budget.budgetAmount,
-                                  startDate: newStart.toISOString().split('T')[0],
-                                  endDate: newEnd.toISOString().split('T')[0],
-                                  periodType: budget.periodType,
-                                  warningThresholdPercent: budget.warningThresholdPercent,
-                                  currencyCode: budget.currencyCode,
-                                });
-
-                                await fetchData();
-                              } catch (err) {
-                                console.error(err);
-                                alert('Không thể cập nhật.');
-                              }
-                            }}
-                            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center gap-1"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            Thêm
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-
-              {/* Form tạo mới */}
-              <div className="border-t border-slate-100 pt-4 mt-4">
-                <p className="text-xs text-slate-500 mb-2 font-medium">Hoặc tạo ngân sách mới:</p>
                 <form onSubmit={async (e) => {
                   e.preventDefault();
-                  if (!newBudgetName || !newBudgetAmount) return;
+                  const fundedTargets = newBudgetTargets.filter(target => target.targetAmount > 0);
+                  if (!defaultBudgetName || fundedTargets.length === 0) {
+                    setBudgetFormError('Vui lòng nhập số tiền lớn hơn 0 cho ít nhất một danh mục.');
+                    return;
+                  }
+                  setBudgetFormError('');
                   try {
-                    const start = new Date(parseInt(selectedYear), selectedMonth - 1, 1);
-                    const end = new Date(parseInt(selectedYear), selectedMonth, 0);
-                    await budgetService.create({
-                      name: newBudgetName,
-                      budgetAmount: parseFloat(newBudgetAmount),
-                      startDate: start.toISOString().split('T')[0],
-                      endDate: end.toISOString().split('T')[0],
-                      periodType: 'MONTHLY',
+                    const createdBudget = await budgetService.create({
+                      name: defaultBudgetName,
+                      month: selectedMonth,
+                      year: parseInt(selectedYear),
                       warningThresholdPercent: 80,
                       currencyCode: 'VND',
+                      targets: fundedTargets.map(target => ({
+                        ...target,
+                        name: target.name.trim(),
+                      })),
                     });
-                    await fetchData();
+                    setBudgets(current => [
+                      ...current.filter(budget => budget.id !== createdBudget.id),
+                      createdBudget,
+                    ]);
+                    const createdDetails = await budgetService.getDetails(createdBudget.id).catch(() => null);
+                    if (createdDetails) {
+                      setBudgetDetails(current => ({
+                        ...current,
+                        [createdDetails.id]: createdDetails,
+                      }));
+                    }
                     resetForm();
+                    setShowAddBudgetToMonth(false);
                   } catch (err) {
                     console.error(err);
                     alert('Không thể tạo.');
                   }
-                }} className="space-y-2">
+                }} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Tháng</label>
+                  <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm font-medium">
+                    {VIETNAMESE_MONTHS[selectedMonth - 1]} {selectedYear}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Tên ngân sách</label>
                   <input
                     type="text"
-                    value={newBudgetName}
-                    onChange={(e) => setNewBudgetName(e.target.value)}
-                    placeholder="Tên ngân sách"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
+                    value={defaultBudgetName}
+                    readOnly
+                    aria-readonly="true"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 text-sm cursor-not-allowed"
                   />
-                  <input
-                    type="number"
-                    value={newBudgetAmount}
-                    onChange={(e) => setNewBudgetAmount(e.target.value)}
-                    placeholder="Số tiền"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
-                  />
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-600">Phân bổ theo danh mục</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewTagInput(true)}
+                      className="text-xs text-blue-600 font-medium flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Thêm danh mục
+                    </button>
+                  </div>
+
+                  {showNewTagInput && (
+                    <div className="flex gap-2 p-3 rounded-xl border border-blue-200 bg-blue-50">
+                      <input
+                        type="text"
+                        value={newTagName}
+                        onChange={(e) => setNewTagName(e.target.value)}
+                        placeholder="Tên danh mục mới"
+                        autoFocus
+                        className="min-w-0 flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm"
+                      />
+                      <button
+                        type="button"
+                        disabled={isCreatingTag || !newTagName.trim()}
+                        onClick={async () => {
+                          if (!newTagName.trim()) return;
+                          setIsCreatingTag(true);
+                          try {
+                            const createdTag = await tagService.create({
+                              name: newTagName.trim(),
+                              type: 'EXPENSE',
+                            });
+                            setTags(currentTags => [...currentTags, createdTag]);
+                            setNewBudgetTargets(targets => [
+                              ...targets,
+                              {
+                                name: createdTag.name,
+                                targetAmount: 0,
+                                tagId: createdTag.id,
+                                tagName: createdTag.name,
+                              },
+                            ]);
+                            setNewTagName('');
+                            setShowNewTagInput(false);
+                          } catch (error) {
+                            console.error('Error creating tag:', error);
+                            setBudgetFormError('Không thể tạo danh mục mới.');
+                          } finally {
+                            setIsCreatingTag(false);
+                          }
+                        }}
+                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-50"
+                      >
+                        {isCreatingTag ? 'Đang thêm...' : 'Thêm'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowNewTagInput(false); setNewTagName(''); }}
+                        className="p-2 rounded-lg text-slate-500 hover:bg-white"
+                        title="Hủy"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  {newBudgetTargets.length === 0 && (
+                    <p className="py-4 text-center text-xs text-slate-400">
+                      Chưa có danh mục chi tiêu. Hãy thêm danh mục mới.
+                    </p>
+                  )}
+
+                  {newBudgetTargets.map((target, index) => (
+                    <div
+                      key={target.tagId ?? index}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-200 bg-white"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs font-bold shrink-0">
+                        {target.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
+                        {target.name}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={target.targetAmount}
+                        onChange={(e) => setNewBudgetTargets(targets => targets.map((item, i) =>
+                          i === index ? { ...item, targetAmount: Number(e.target.value) } : item
+                        ))}
+                        aria-label={`Ngân sách cho ${target.name}`}
+                        className="w-32 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-right text-sm font-medium"
+                      />
+                      <span className="text-xs text-slate-400">đ</span>
+                    </div>
+                  ))}
+                </div>
+
+                {budgetFormError && (
+                  <p className="text-xs font-medium text-rose-600">{budgetFormError}</p>
+                )}
+
+                <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-blue-50 text-sm">
+                  <span className="text-blue-700">Tổng ngân sách (tự động)</span>
+                  <span className="font-bold text-blue-700">
+                    {newBudgetTargets.reduce((sum, target) => sum + (target.targetAmount || 0), 0).toLocaleString('vi-VN')} đ
+                  </span>
+                </div>
+
                   <button
                     type="submit"
                     className="w-full px-3 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600"
                   >
                     Tạo ngân sách mới
                   </button>
-                </form>
-              </div>
+              </form>
             </div>
           </div>
         </div>

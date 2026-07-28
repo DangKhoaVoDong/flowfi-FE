@@ -220,36 +220,58 @@ export interface CreateTransferRequest {
 }
 
 // Budget DTOs - matched with BE BudgetResponse
-export interface BudgetDto {
-  id: string;
-  userId: string;
-  tagId?: string;
-  tagName?: string;
+export interface BudgetTargetRequest {
+  tagId?: string | null;
+  tagName?: string | null;
   name: string;
-  periodType: string;
-  budgetAmount: number;
-  warningThresholdPercent: number;
-  currencyCode: string;
-  startDate: string;
-  endDate: string;
-  status: string;
+  targetAmount: number;
+}
+
+export interface BudgetTargetDto extends BudgetTargetRequest {
+  id: string;
   createdAt: string;
   updatedAt?: string;
 }
 
-export interface CreateBudgetRequest {
-  tagId?: string;
-  tagName?: string;
-  name: string;
-  periodType?: string;
-  budgetAmount: number;
-  warningThresholdPercent?: number;
-  currencyCode?: string;
-  startDate: string;
-  endDate: string;
+export interface BudgetTargetDetailsDto extends BudgetTargetDto {
+  spentAmount: number;
+  remainingAmount: number;
+  usagePercent: number;
+  transactionCount: number;
 }
 
-export interface UpdateBudgetRequest extends Partial<CreateBudgetRequest> {
+export interface BudgetDto {
+  id: string;
+  userId: string;
+  name: string;
+  month: number;
+  year: number;
+  totalTargetAmount: number;
+  warningThresholdPercent: number;
+  currencyCode: string;
+  status: string;
+  createdAt: string;
+  updatedAt?: string;
+  targets: BudgetTargetDto[];
+}
+
+export interface BudgetDetailsDto extends Omit<BudgetDto, 'targets'> {
+  spentAmount: number;
+  remainingAmount: number;
+  usagePercent: number;
+  targets: BudgetTargetDetailsDto[];
+}
+
+export interface CreateBudgetRequest {
+  name: string;
+  month: number;
+  year: number;
+  warningThresholdPercent?: number;
+  currencyCode?: string;
+  targets: BudgetTargetRequest[];
+}
+
+export interface UpdateBudgetRequest extends CreateBudgetRequest {
   status?: string;
 }
 
