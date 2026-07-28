@@ -355,3 +355,60 @@ export interface CreateRecurringTransactionDto {
 export interface UpdateRecurringTransactionDto extends Partial<CreateRecurringTransactionDto> {
   isActive?: boolean;
 }
+
+// Payment Obligation DTOs
+export type PaymentObligationFrequency = 'ONCE' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+export type PaymentObligationPaymentStatus = 'PENDING' | 'REMINDED' | 'PAID' | 'OVERDUE' | 'SKIPPED';
+
+export interface PaymentObligationDto {
+  id: string;
+  userId: string;
+  walletId: string;
+  tagId?: string;
+  totalAmount: number;
+  cycleCount: number;
+  amountPerCycle: number;
+  title: string;
+  note?: string;
+  frequency: PaymentObligationFrequency;
+  firstDueAt: string;
+  finalDueAt: string;
+  nextDueAt: string;
+  reminderDaysBefore: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePaymentObligationDto {
+  walletId: string;
+  tagId?: string;
+  totalAmount: number;
+  cycleCount: number;
+  title: string;
+  note?: string;
+  frequency: PaymentObligationFrequency;
+  firstDueAt: string;
+  reminderDaysBefore: number;
+  isActive: boolean;
+}
+
+export interface UpdatePaymentObligationDto extends CreatePaymentObligationDto {}
+
+export interface PaymentObligationPaymentDto {
+  id: string;
+  obligationId: string;
+  userId: string;
+  dueAt: string;
+  amount: number;
+  status: PaymentObligationPaymentStatus;
+  remindedAt?: string;
+  paidAt?: string;
+  transactionId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PayPaymentObligationPaymentRequest {
+  paidAt?: string;
+}

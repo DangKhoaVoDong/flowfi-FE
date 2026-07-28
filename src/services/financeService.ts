@@ -15,6 +15,11 @@ import type {
   RecurringTransactionDto,
   CreateRecurringTransactionDto,
   UpdateRecurringTransactionDto,
+  PaymentObligationDto,
+  CreatePaymentObligationDto,
+  UpdatePaymentObligationDto,
+  PaymentObligationPaymentDto,
+  PayPaymentObligationPaymentRequest,
 } from '../types/api';
 
 // ============ WALLETS ============
@@ -143,10 +148,67 @@ export const recurringService = {
   },
 };
 
+// ============ PAYMENT OBLIGATIONS ============
+export const paymentObligationService = {
+  getAll: async (): Promise<PaymentObligationDto[]> => {
+    const response = await apiClient.get<PaymentObligationDto[]>('/api/payment-obligations');
+    return response.data;
+  },
+
+  getById: async (id: string): Promise<PaymentObligationDto | null> => {
+    const response = await apiClient.get<PaymentObligationDto>(`/api/payment-obligations/${id}`);
+    return response.data;
+  },
+
+  create: async (data: CreatePaymentObligationDto): Promise<PaymentObligationDto> => {
+    const response = await apiClient.post<PaymentObligationDto>('/api/payment-obligations', data);
+    return response.data;
+  },
+
+  update: async (id: string, data: UpdatePaymentObligationDto): Promise<PaymentObligationDto> => {
+    const response = await apiClient.put<PaymentObligationDto>(`/api/payment-obligations/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await apiClient.delete(`/api/payment-obligations/${id}`);
+  },
+
+  getPayments: async (
+    obligationId: string,
+    params?: { status?: string; from?: string; to?: string }
+  ): Promise<PaymentObligationPaymentDto[]> => {
+    const response = await apiClient.get<PaymentObligationPaymentDto[]>(
+      `/api/payment-obligations/${obligationId}/payments`,
+      { params }
+    );
+    return response.data;
+  },
+
+  payPayment: async (
+    paymentId: string,
+    data: PayPaymentObligationPaymentRequest = {}
+  ): Promise<PaymentObligationPaymentDto> => {
+    const response = await apiClient.post<PaymentObligationPaymentDto>(
+      `/api/payment-obligation-payments/${paymentId}/pay`,
+      data
+    );
+    return response.data;
+  },
+
+  skipPayment: async (paymentId: string): Promise<PaymentObligationPaymentDto> => {
+    const response = await apiClient.post<PaymentObligationPaymentDto>(
+      `/api/payment-obligation-payments/${paymentId}/skip`
+    );
+    return response.data;
+  },
+};
+
 export default {
   walletService,
   transactionService,
   tagService,
   transferService,
   recurringService,
+  paymentObligationService,
 };

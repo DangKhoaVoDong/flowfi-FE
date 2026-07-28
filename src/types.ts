@@ -4,6 +4,7 @@ export type ScreenId =
   | 'transactions'
   | 'ai-input'
   | 'budget'
+  | 'debt-reminders'
   | 'admin-tokens'
   | 'admin-users'
   | 'admin-audit';

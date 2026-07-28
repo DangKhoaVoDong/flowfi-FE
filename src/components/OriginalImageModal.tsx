@@ -37,6 +37,10 @@ export const OriginalImageModal: React.FC<OriginalImageModalProps> = ({
       title: 'FlowFi - Quản lý Ngân sách 12 Tháng (VNĐ)',
       desc: 'Lộ trình ngân sách 12 tháng với các thẻ theo dõi tiến độ chi tiêu hàng tháng (Vượt hạn mức, An toàn, Hiện tại, Lập kế hoạch).'
     },
+    'debt-reminders': {
+      title: 'FlowFi - Nhắc trả nợ (VNĐ)',
+      desc: 'Theo dõi khoản nợ, kỳ trả, ngày đến hạn và thao tác đánh dấu đã trả hoặc bỏ qua từng kỳ.'
+    },
     'admin-tokens': {
       title: 'FlowFi Admin - Giám sát Token & Session (VNĐ)',
       desc: 'Cổng quản trị tối màu giám sát phiên hoạt động, TTL trung bình, thu hồi token trực tiếp và luồng giám sát thời gian thực.'

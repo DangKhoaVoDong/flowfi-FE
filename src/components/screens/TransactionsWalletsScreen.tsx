@@ -169,6 +169,14 @@ export const TransactionsWalletsScreen: React.FC<TransactionsWalletsScreenProps>
             <PieChart className="w-4 h-4" />
             <span>Ngân sách</span>
           </button>
+
+          <button
+            onClick={() => onNavigate('debt-reminders')}
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+          >
+            <Bell className="w-4 h-4" />
+            <span>Nhắc nợ</span>
+          </button>
         </div>
 
         <div className="p-4 border-t border-slate-100 space-y-1">
