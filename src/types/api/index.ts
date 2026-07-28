@@ -6,6 +6,49 @@ export interface ApiResponse<T> {
   errors?: string[];
 }
 
+// Admin API contracts. User administration uses ApiResponse; AI administration
+// returns these DTOs directly.
+export type AdminRole = 'Admin' | 'User';
+export type UserStatus = 'Active' | 'Suspended';
+export type AiUsageStatus = 'Succeeded' | 'Failed';
+
+export interface AdminUserDto {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: AdminRole;
+  status: UserStatus;
+  authProvider: string;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface AdminUserPage { items: AdminUserDto[]; page: number; pageSize: number; total: number; }
+export interface AdminUserQuery { page?: number; pageSize?: number; search?: string; role?: AdminRole; status?: UserStatus; }
+export interface AdminAiConfig {
+  provider: string; baseUrl: string; responsesPath: string; model: string;
+  timeoutSeconds: number; apiKeyConfigured: boolean; maskedApiKey: string; updatedAt: string | null;
+}
+export interface UpdateAdminAiConfig {
+  provider: string; baseUrl: string; responsesPath: string; model: string;
+  timeoutSeconds: number; apiKey?: string | null;
+}
+export interface AiProviderTestResult { success: boolean; statusCode: number; }
+export interface AiUsageSummary {
+  totalRequests: number; successfulRequests: number; failedRequests: number;
+  inputTokens: number; outputTokens: number; totalTokens: number; averageLatencyMs: number;
+}
+export interface AiUsageRecord {
+  id: string; requestId: string | null; userId: string | null; provider: string; model: string;
+  operation: string; inputTokens: number; outputTokens: number; totalTokens: number;
+  latencyMs: number; status: AiUsageStatus | string; errorCode: string | null; createdAt: string;
+}
+export interface AiUsagePage { items: AiUsageRecord[]; page: number; pageSize: number; total: number; }
+export interface AiUsageQuery {
+  page?: number; pageSize?: number; from?: string; to?: string; provider?: string;
+  model?: string; operation?: string; status?: AiUsageStatus;
+}
+
 // Auth DTOs
 export interface LoginRequest {
   email: string;

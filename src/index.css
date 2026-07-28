@@ -1,1 +1,27 @@
 @import "tailwindcss";
+
+.input {
+  border: 1px solid rgb(51 65 85);
+  border-radius: 0.75rem;
+  background: rgb(11 14 20);
+  padding: 0.5rem 0.75rem;
+  color: white;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.input:focus { border-color: rgb(59 130 246); }
+
+/* Shared light theme for the Admin surfaces. */
+.admin-light { color: #0f172a; }
+.admin-light [class*="bg-[#0b0e14]"],
+.admin-light [class*="bg-[#121824]"],
+.admin-light [class*="bg-[#151b26]"] { background-color: #ffffff !important; }
+.admin-light [class*="border-slate-8"], .admin-light [class*="border-slate-7"] { border-color: #e2e8f0 !important; }
+.admin-light [class*="divide-slate-8"] > :not([hidden]) ~ :not([hidden]) { border-color: #e2e8f0 !important; }
+.admin-light [class*="text-slate-100"], .admin-light [class*="text-slate-300"], .admin-light [class*="text-slate-400"] { color: #475569 !important; }
+.admin-light h1, .admin-light h2, .admin-light h3, .admin-light strong { color: #0f172a; }
+.admin-light [class*="text-white"]:not([class*="bg-blue"]):not([class*="bg-rose"]) { color: #0f172a !important; }
+.admin-light [class*="hover:bg-slate-800"]:hover { background-color: #f1f5f9 !important; }
+.admin-light [class*="bg-black/20"] { background-color: #f8fafc !important; }
+.admin-light .input { background-color: #ffffff; border-color: #cbd5e1; color: #0f172a; }
