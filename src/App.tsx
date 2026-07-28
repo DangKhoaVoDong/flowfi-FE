@@ -8,26 +8,32 @@ import { BudgetRoadmapScreen } from './components/screens/BudgetRoadmapScreen';
 import { DebtReminderScreen } from './components/screens/DebtReminderScreen';
 import { AdminTokenScreen } from './components/screens/AdminTokenScreen';
 import { AdminUserScreen } from './components/screens/AdminUserScreen';
-import { AdminAuditScreen } from './components/screens/AdminAuditScreen';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { currentAdminIdentity, getPostAuthScreen } from './services/adminAuth';
+
+function ForbiddenScreen({ onNavigate }: { onNavigate: (screen: ScreenId) => void }) {
+  return <main className="grid min-h-[70vh] place-items-center p-6 text-center"><div><h1 className="text-3xl font-bold">403 — Không có quyền truy cập</h1><p className="mt-3 text-slate-400">Tài khoản này không có quyền quản trị.</p><button onClick={() => onNavigate('dashboard')} className="mt-6 rounded-xl bg-blue-600 px-4 py-2 font-semibold">Về dashboard</button></div></main>;
+}
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('landing');
   const prevAuthRef = useRef<boolean | null>(null);
 
-  // Redirect to dashboard when authenticated (watch for auth state changes)
+  // Redirect after login and restore the correct area after a page refresh.
   useEffect(() => {
-    // Skip initial render
+    if (isLoading) return;
+
     if (prevAuthRef.current === null) {
       prevAuthRef.current = isAuthenticated;
+      if (isAuthenticated) setCurrentScreen(getPostAuthScreen());
       return;
     }
     
     // Auth state changed to authenticated
-    if (isAuthenticated && !isLoading && !prevAuthRef.current) {
+    if (isAuthenticated && !prevAuthRef.current) {
       prevAuthRef.current = true;
-      setCurrentScreen('dashboard');
+      setCurrentScreen(getPostAuthScreen());
     }
   }, [isAuthenticated, isLoading]);
 
@@ -40,6 +46,10 @@ function AppContent() {
 
   // Navigate to specific screen
   const handleNavigate = (screen: ScreenId) => {
+    if (screen.startsWith('admin') && !currentAdminIdentity().isAdmin) {
+      setCurrentScreen('forbidden');
+      return;
+    }
     setCurrentScreen(screen);
   };
 
@@ -84,8 +94,9 @@ function AppContent() {
           <AdminUserScreen onNavigate={handleNavigate} />
         )}
         {currentScreen === 'admin-audit' && (
-          <AdminAuditScreen onNavigate={handleNavigate} />
+          <AdminTokenScreen onNavigate={handleNavigate} />
         )}
+        {currentScreen === 'forbidden' && <ForbiddenScreen onNavigate={handleNavigate} />}
       </div>
     </div>
   );

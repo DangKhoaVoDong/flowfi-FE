@@ -24,19 +24,11 @@ export const authService = {
 
   // POST /auth/login
   login: async (data: LoginRequest): Promise<LoginResponse> => {
-    console.log('[Auth] Calling login API...');
     const response = await apiClient.post<ApiResponse<LoginResponse>>('/auth/login', data);
     const loginResponse = response.data.data;
-    console.log('[Auth] Login response success:', response.data.success);
-    console.log('[Auth] Login response data:', loginResponse);
-    console.log('[Auth] Tokens:', loginResponse?.tokens ? {
-      accessToken: loginResponse.tokens.accessToken?.substring(0, 30) + '...',
-      refreshToken: loginResponse.tokens.refreshToken?.substring(0, 30) + '...'
-    } : 'NULL');
     if (loginResponse?.tokens) {
       tokenService.setAccessToken(loginResponse.tokens.accessToken);
       tokenService.setRefreshToken(loginResponse.tokens.refreshToken);
-      console.log('[Auth] Tokens saved to localStorage');
     }
     return loginResponse;
   },

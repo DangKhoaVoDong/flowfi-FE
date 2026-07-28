@@ -53,6 +53,10 @@ export const OriginalImageModal: React.FC<OriginalImageModalProps> = ({
       title: 'FlowFi Admin - Nhật ký Hệ thống (VNĐ)',
       desc: 'Nhật ký kiểm tra hệ thống thời gian thực với độ trễ 14ms, mã tương quan, mã quản trị và bộ lọc bản ghi thao tác.'
     },
+    forbidden: {
+      title: 'Không có quyền truy cập',
+      desc: 'Tài khoản hiện tại không có quyền truy cập khu vực quản trị.'
+    },
   };
 
   const current = screenInfo[currentScreen];

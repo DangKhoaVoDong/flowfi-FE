@@ -7,7 +7,8 @@ export type ScreenId =
   | 'debt-reminders'
   | 'admin-tokens'
   | 'admin-users'
-  | 'admin-audit';
+  | 'admin-audit'
+  | 'forbidden';
 
 export interface Transaction {
   id: string;

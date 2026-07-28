@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ScreenId, Transaction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { currentAdminIdentity } from '../../services/adminAuth';
 import { walletService, transactionService, summaryService, budgetService, analyticsService, tagService } from '../../services';
 import type { WalletDto, TransactionDto, FinancialSummaryDto, BudgetDto, BudgetProgressDto, TagDto } from '../../types/api';
 import type { CashflowResponse, RatiosResponse } from '../../services/analyticsService';
 import {
-  LayoutDashboard, CreditCard, Bot, PieChart, Settings, HelpCircle,
+  LayoutDashboard, CreditCard, Bot, PieChart, Settings, HelpCircle, Shield,
   Search, Bell, Plus, Wallet as WalletIcon, TrendingUp, TrendingDown, MoreHorizontal,
   Download, PiggyBank, Award, Landmark, AlertCircle, ShoppingBag, Car, DollarSign, Laptop,
   Loader2, Tag, Pencil, Trash2, X, LogOut
@@ -17,6 +18,7 @@ interface UserDashboardScreenProps {
 
 export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavigate }) => {
   const { user, logout } = useAuth();
+  const isAdmin = currentAdminIdentity().isAdmin;
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -255,6 +257,16 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
             <Bell className="w-4 h-4" />
             <span>Nhắc nợ</span>
           </button>
+
+          {isAdmin && (
+            <button
+              onClick={() => onNavigate('admin-users')}
+              className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
+            >
+              <Shield className="w-4 h-4" />
+              <span>Khu quản trị</span>
+            </button>
+          )}
         </div>
 
         {/* Secondary Navigation */}

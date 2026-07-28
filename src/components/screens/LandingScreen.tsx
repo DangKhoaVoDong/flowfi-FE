@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ScreenId } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { getPostAuthScreen } from '../../services/adminAuth';
 import { 
   Sparkles, Wallet, Cpu, Calendar, 
   CheckCircle2, ChevronRight, Loader2, TrendingUp, Bell, Download, Smartphone
@@ -49,7 +50,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({ onNavigate }) => {
 
       try {
         await register({ email, password, fullName });
-        onNavigate('dashboard');
+        onNavigate(getPostAuthScreen());
       } catch {
         // Error handled by context
       }
@@ -57,7 +58,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({ onNavigate }) => {
       // Login mode
       try {
         await login({ email, password });
-        onNavigate('dashboard');
+        onNavigate(getPostAuthScreen());
       } catch {
         // Error handled by context
       }
