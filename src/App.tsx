@@ -5,6 +5,7 @@ import { UserDashboardScreen } from './components/screens/UserDashboardScreen';
 import { TransactionsWalletsScreen } from './components/screens/TransactionsWalletsScreen';
 import { AIProcessingScreen } from './components/screens/AIProcessingScreen';
 import { BudgetRoadmapScreen } from './components/screens/BudgetRoadmapScreen';
+import { DebtReminderScreen } from './components/screens/DebtReminderScreen';
 import { AdminTokenScreen } from './components/screens/AdminTokenScreen';
 import { AdminUserScreen } from './components/screens/AdminUserScreen';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -82,6 +83,9 @@ function AppContent() {
         )}
         {currentScreen === 'budget' && (
           <BudgetRoadmapScreen onNavigate={handleNavigate} />
+        )}
+        {currentScreen === 'debt-reminders' && (
+          <DebtReminderScreen onNavigate={handleNavigate} />
         )}
         {currentScreen === 'admin-tokens' && (
           <AdminTokenScreen onNavigate={handleNavigate} />

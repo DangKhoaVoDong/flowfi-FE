@@ -19,12 +19,13 @@ export const HeaderNav: React.FC<HeaderNavProps> = ({
     { id: 'transactions', label: '3. Ví & Giao dịch', num: 'Màn 3' },
     { id: 'ai-input', label: '4. Xử lý Giao dịch AI', num: 'Màn 4' },
     { id: 'budget', label: '5. Ngân sách 12 Tháng', num: 'Màn 5' },
+    { id: 'debt-reminders', label: '6. Nhắc trả nợ', num: 'Màn 6' },
   ];
 
   const adminScreens: { id: ScreenId; label: string; num: string }[] = [
-    { id: 'admin-tokens', label: '6. Giám sát Token & Session', num: 'Màn 6' },
-    { id: 'admin-users', label: '7. Quản lý Người dùng', num: 'Màn 7' },
-    { id: 'admin-audit', label: '8. Nhật ký Hệ thống', num: 'Màn 8' },
+    { id: 'admin-tokens', label: '7. Giám sát Token & Session', num: 'Màn 7' },
+    { id: 'admin-users', label: '8. Quản lý Người dùng', num: 'Màn 8' },
+    { id: 'admin-audit', label: '9. Nhật ký Hệ thống', num: 'Màn 9' },
   ];
 
   const isAdminScreen = currentScreen.startsWith('admin');
