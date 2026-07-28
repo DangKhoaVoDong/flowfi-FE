@@ -144,8 +144,14 @@ export const BudgetRoadmapScreen: React.FC<Props> = ({ onNavigate }) => {
         const collected: TransactionDto[] = [];
         let page = 1;
         while (true) {
-          const response = await transactionService.getAll({ page, pageSize: 100, from, to });
-          collected.push(...(response.items || []));
+          const response = await transactionService.getAll({
+            page,
+            pageSize: 100,
+            from,
+            to,
+            status: 'CONFIRMED',
+          });
+          collected.push(...(response.items || []).filter(item => item.status === 'CONFIRMED'));
           if (!response.items?.length || collected.length >= response.total) break;
           page += 1;
         }

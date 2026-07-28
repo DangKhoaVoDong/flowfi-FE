@@ -33,6 +33,10 @@ export const OriginalImageModal: React.FC<OriginalImageModalProps> = ({
       title: 'FlowFi - Xử lý và Xác nhận Giao dịch AI (VNĐ)',
       desc: 'Gửi hóa đơn kéo thả, hàng chờ xử lý OCR/phân tích và bảng xác nhận kết quả trích xuất từ FlowAI (98% độ tin cậy).'
     },
+    'ai-image': {
+      title: 'FlowFi - Nhập ảnh giao dịch bằng AI',
+      desc: 'Tải ảnh hóa đơn hoặc chuyển khoản để AI nhận diện và tạo giao dịch nháp.'
+    },
     'budget': {
       title: 'FlowFi - Quản lý Ngân sách 12 Tháng (VNĐ)',
       desc: 'Lộ trình ngân sách 12 tháng với các thẻ theo dõi tiến độ chi tiêu hàng tháng (Vượt hạn mức, An toàn, Hiện tại, Lập kế hoạch).'

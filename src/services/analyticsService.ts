@@ -151,7 +151,7 @@ export const budgetService = {
 export const summaryService = {
   get: async (query: FinancialSummaryQuery): Promise<FinancialSummaryDto> => {
     const response = await apiClient.get<FinancialSummaryDto>('/api/analytics/financial-summaries', { params: query });
-    return response.data;
+    return unwrap<FinancialSummaryDto>(response.data);
   },
 
   getCurrentMonth: async (): Promise<FinancialSummaryDto> => {
@@ -201,7 +201,7 @@ export const analyticsService = {
     const response = await apiClient.get<CashflowResponse>('/api/analytics/cashflow/daily', {
       params: { days }
     });
-    return response.data;
+    return unwrap<CashflowResponse>(response.data);
   },
 
   // GET /api/analytics/ratios - Returns RatiosResponse directly

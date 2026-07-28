@@ -6,6 +6,7 @@ const screenPaths: Partial<Record<ScreenId, string>> = {
   transactions: '/transactions',
   wallets: '/wallets',
   'ai-input': '/transactions/quick-add',
+  'ai-image': '/transactions/import-image',
   budget: '/budgets',
   goals: '/goals',
   reports: '/reports',
@@ -29,6 +30,7 @@ export const screenFromLocation = (
   if (path === '/' && new URLSearchParams(location.search).has('year')) return 'budget';
   if (path === '/') return 'landing';
   if (path === '/dashboard') return 'dashboard';
+  if (path === '/transactions/import-image') return 'ai-image';
   if (path === '/transactions/quick-add') return 'ai-input';
   if (path === '/transactions') return 'transactions';
   if (path === '/wallets') return 'wallets';

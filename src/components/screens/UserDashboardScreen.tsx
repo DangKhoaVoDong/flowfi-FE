@@ -3,18 +3,54 @@ import { ScreenId, Transaction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { currentAdminIdentity } from '../../services/adminAuth';
 import { walletService, transactionService, summaryService, budgetService, analyticsService, tagService } from '../../services';
-import type { WalletDto, TransactionDto, FinancialSummaryDto, BudgetDto, BudgetProgressDto, TagDto } from '../../types/api';
-import type { CashflowResponse, RatiosResponse } from '../../services/analyticsService';
+import type { WalletDto, TransactionDto, FinancialSummaryDto, MonthlyBudgetOverviewDto, TagDto } from '../../types/api';
+import type { CashflowResponse } from '../../services/analyticsService';
 import {
   LayoutDashboard, CreditCard, Bot, PieChart, Settings, HelpCircle, Shield,
   Search, Bell, Plus, Wallet as WalletIcon, TrendingUp, TrendingDown, MoreHorizontal,
-  Download, PiggyBank, Award, Landmark, AlertCircle, ShoppingBag, Car, DollarSign, Laptop,
+  Download, PiggyBank, AlertCircle, ShoppingBag, Car, DollarSign, Laptop,
   Loader2, Tag, Pencil, Trash2, X, LogOut
 } from 'lucide-react';
 
 interface UserDashboardScreenProps {
   onNavigate: (screen: ScreenId) => void;
 }
+
+const localDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+const buildCashflowFromTransactions = (
+  items: TransactionDto[],
+  days: number,
+): CashflowResponse['dailyData'] => {
+  const normalizedDays = Math.max(1, days);
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(end.getDate() - normalizedDays + 1);
+  start.setHours(0, 0, 0, 0);
+
+  const totals = new Map<string, { income: number; expense: number }>();
+  items
+    .filter(item => item.status === 'CONFIRMED')
+    .forEach(item => {
+      const transactionDate = new Date(item.transactionDate);
+      if (Number.isNaN(transactionDate.getTime()) || transactionDate < start || transactionDate > end) return;
+      const key = localDateKey(transactionDate);
+      const current = totals.get(key) || { income: 0, expense: 0 };
+      const amount = Math.abs(Number(item.amount) || 0);
+      if (item.type === 'INCOME') current.income += amount;
+      if (item.type === 'EXPENSE') current.expense += amount;
+      totals.set(key, current);
+    });
+
+  return Array.from({ length: normalizedDays }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const key = localDateKey(date);
+    const value = totals.get(key) || { income: 0, expense: 0 };
+    return { date: key, ...value };
+  });
+};
 
 export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavigate }) => {
   const { user, logout } = useAuth();
@@ -28,10 +64,8 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
   const [wallets, setWallets] = useState<WalletDto[]>([]);
   const [transactions, setTransactions] = useState<TransactionDto[]>([]);
   const [summary, setSummary] = useState<FinancialSummaryDto | null>(null);
-  const [budgets, setBudgets] = useState<BudgetDto[]>([]);
-  const [budgetProgress, setBudgetProgress] = useState<BudgetProgressDto[]>([]);
+  const [monthlyBudget, setMonthlyBudget] = useState<MonthlyBudgetOverviewDto | null>(null);
   const [cashflow, setCashflow] = useState<CashflowResponse['dailyData']>([]);
-  const [ratios, setRatios] = useState<RatiosResponse | null>(null);
   const [tags, setTags] = useState<TagDto[]>([]);
 
   // New transaction modal state
@@ -51,12 +85,29 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [walletsRes, transactionsRes, summaryRes, cashflowRes, ratiosRes, tagsRes] = await Promise.allSettled([
+      const today = new Date();
+      const rangeStart = new Date(today);
+      rangeStart.setDate(today.getDate() - Math.max(1, cashflowDays) + 1);
+      rangeStart.setHours(0, 0, 0, 0);
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      const [walletsRes, transactionsRes, cashflowTransactionsRes, monthlyTransactionsRes, summaryRes, cashflowRes, budgetRes, tagsRes] = await Promise.allSettled([
         walletService.getAll(),
-        transactionService.getAll({ pageSize: 10 }),
+        transactionService.getAll({ pageSize: 5, status: 'CONFIRMED' }),
+        transactionService.getAll({
+          pageSize: 100,
+          status: 'CONFIRMED',
+          from: rangeStart.toISOString(),
+          to: today.toISOString(),
+        }),
+        transactionService.getAll({
+          pageSize: 100,
+          status: 'CONFIRMED',
+          from: monthStart.toISOString(),
+          to: today.toISOString(),
+        }),
         summaryService.getCurrentMonth(),
         analyticsService.getDailyCashflow(cashflowDays),
-        analyticsService.getRatios(),
+        budgetService.getMonthlyOverview(today.getFullYear(), today.getMonth() + 1),
         tagService.getAll(),
       ]);
 
@@ -68,32 +119,78 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
           setSelectedWalletId(walletsRes.value[0].id);
         }
       }
+      const transactionItems = transactionsRes.status === 'fulfilled'
+        ? transactionsRes.value?.items || []
+        : [];
+      const cashflowTransactionItems = cashflowTransactionsRes.status === 'fulfilled'
+        ? cashflowTransactionsRes.value?.items || []
+        : [];
       if (transactionsRes.status === 'fulfilled') {
         // BE returns PagedTransactionsResponse: { items, page, pageSize, total }
-        const pagedResponse = transactionsRes.value;
-        const items = pagedResponse?.items || [];
-        setTransactions(Array.isArray(items) ? items.slice(0, 5) : []);
+        setTransactions(Array.isArray(transactionItems) ? transactionItems.slice(0, 5) : []);
       }
+      const monthlyPage = monthlyTransactionsRes.status === 'fulfilled'
+        ? monthlyTransactionsRes.value
+        : null;
+      const monthlyItems = Array.isArray(monthlyPage?.items) ? monthlyPage.items : [];
+      const hasCompleteMonthlyFinanceData = monthlyPage !== null && monthlyPage.total <= monthlyItems.length;
+      const monthlyIncome = monthlyItems
+        .filter(item => item.status === 'CONFIRMED' && item.type === 'INCOME')
+        .reduce((sum, item) => sum + Math.abs(Number(item.amount) || 0), 0);
+      const monthlyExpense = monthlyItems
+        .filter(item => item.status === 'CONFIRMED' && item.type === 'EXPENSE')
+        .reduce((sum, item) => sum + Math.abs(Number(item.amount) || 0), 0);
       if (summaryRes.status === 'fulfilled') {
-        // BE returns FinancialSummaryResponse directly
-        setSummary(summaryRes.value || null);
-      }
-      // Fetch budget progress separately with explicit error handling
-      try {
-        const budgetData = await budgetService.getAllProgress();
-        setBudgetProgress(Array.isArray(budgetData) ? budgetData : []);
-      } catch (budgetError) {
-        console.warn('Budget progress API error (non-blocking):', budgetError);
-        setBudgetProgress([]); // Set empty array on error
+        const apiSummary = summaryRes.value;
+        const budgetTarget = budgetRes.status === 'fulfilled'
+          ? budgetRes.value?.summary.targetAmount || 0
+          : apiSummary.totalBudget;
+        const totalIncome = hasCompleteMonthlyFinanceData ? monthlyIncome : apiSummary.totalIncome;
+        const totalExpense = hasCompleteMonthlyFinanceData ? monthlyExpense : apiSummary.totalExpense;
+        setSummary({
+          ...apiSummary,
+          totalIncome,
+          totalExpense,
+          netSaving: totalIncome - totalExpense,
+          totalBudget: budgetTarget,
+          usedBudget: totalExpense,
+          budgetUsagePercent: budgetTarget > 0 ? totalExpense / budgetTarget * 100 : 0,
+          transactionCount: hasCompleteMonthlyFinanceData ? monthlyItems.length : apiSummary.transactionCount,
+        });
+      } else if (hasCompleteMonthlyFinanceData) {
+        const budgetTarget = budgetRes.status === 'fulfilled'
+          ? budgetRes.value?.summary.targetAmount || 0
+          : 0;
+        setSummary({
+          id: '',
+          userId: '',
+          periodType: 'MONTHLY',
+          periodStartDate: monthStart.toISOString(),
+          periodEndDate: today.toISOString(),
+          month: today.getMonth() + 1,
+          year: today.getFullYear(),
+          totalIncome: monthlyIncome,
+          totalExpense: monthlyExpense,
+          netSaving: monthlyIncome - monthlyExpense,
+          totalBudget: budgetTarget,
+          usedBudget: monthlyExpense,
+          budgetUsagePercent: budgetTarget > 0 ? monthlyExpense / budgetTarget * 100 : 0,
+          transactionCount: monthlyItems.length,
+          calculatedAt: today.toISOString(),
+        });
       }
       if (cashflowRes.status === 'fulfilled') {
         // BE returns CashflowResponse directly: { dailyData, totalIncome, totalExpense, netCashflow }
         const cashflowResponse = cashflowRes.value;
-        setCashflow(Array.isArray(cashflowResponse?.dailyData) ? cashflowResponse.dailyData : []);
+        const apiDailyData = Array.isArray(cashflowResponse?.dailyData) ? cashflowResponse.dailyData : [];
+        const fallbackDailyData = buildCashflowFromTransactions(cashflowTransactionItems, cashflowDays);
+        const apiHasActivity = apiDailyData.some(item => Number(item.income) > 0 || Number(item.expense) > 0);
+        const fallbackHasActivity = fallbackDailyData.some(item => item.income > 0 || item.expense > 0);
+        setCashflow(apiHasActivity || !fallbackHasActivity ? apiDailyData : fallbackDailyData);
+      } else {
+        setCashflow(buildCashflowFromTransactions(cashflowTransactionItems, cashflowDays));
       }
-      if (ratiosRes.status === 'fulfilled') {
-        setRatios(ratiosRes.value);
-      }
+      setMonthlyBudget(budgetRes.status === 'fulfilled' ? budgetRes.value : null);
       if (tagsRes.status === 'fulfilled') {
         setTags(Array.isArray(tagsRes.value) ? tagsRes.value : []);
       }
@@ -119,6 +216,7 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
         description: t.title || '',
         category: t.tagName || (t.type === 'INCOME' ? 'Thu nhập' : 'Chi tiêu'),
         amount: t.type === 'EXPENSE' ? -(t.amount ?? 0) : (t.amount ?? 0),
+        walletId: t.walletId,
         icon: 'default'
       }))
     : [];
@@ -206,6 +304,42 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
     t.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
     t.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} ₫`;
+  const chartWidth = 720;
+  const chartHeight = 240;
+  const chartLeft = 72;
+  const chartRight = 18;
+  const chartTop = 14;
+  const chartBottom = 30;
+  const chartBaseY = chartHeight - chartBottom;
+  const cashflowMax = Math.max(
+    1,
+    ...cashflow.flatMap(item => [Number(item.income || 0), Number(item.expense || 0)]),
+  );
+  const formatChartMoney = (value: number) => {
+    if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} tỷ`;
+    if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} tr`;
+    if (value >= 1_000) return `${(value / 1_000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })}K`;
+    return value.toLocaleString('vi-VN');
+  };
+  const chartPoints = (key: 'income' | 'expense') => cashflow.map((item, index) => {
+    const x = cashflow.length <= 1
+      ? (chartLeft + chartWidth - chartRight) / 2
+      : chartLeft + index / (cashflow.length - 1) * (chartWidth - chartLeft - chartRight);
+    const y = chartBaseY - Number(item[key] || 0) / cashflowMax * (chartBaseY - chartTop);
+    return `${x},${y}`;
+  }).join(' ');
+  const chartLabelIndexes = cashflow
+    .map((_, index) => index)
+    .filter(index => cashflow.length <= 8 || index % Math.ceil(cashflow.length / 7) === 0 || index === cashflow.length - 1);
+  const budgetSummary = monthlyBudget?.summary;
+  const budgetPercent = Math.max(0, budgetSummary?.percentUsed || 0);
+  const budgetTone = budgetPercent >= 100
+    ? 'bg-rose-500'
+    : budgetPercent >= (budgetSummary?.warningThresholdPercent || 80)
+      ? 'bg-amber-500'
+      : 'bg-[#635BFF]';
 
   return (
     <div className="min-h-screen bg-[#F4F6FA] text-slate-900 font-sans flex">
@@ -368,8 +502,8 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
             Chào mừng bạn trở lại{user?.fullName ? `, ${user.fullName}` : ''}.
           </p>
 
-          {/* Top 3 Summary Cards */}
-          <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-5">
+          {/* Top Summary Cards */}
+          <div className="grid md:grid-cols-3 gap-5">
             {/* Primary Blue Card */}
             <div className="bg-gradient-to-br from-blue-600 to-blue-700 text-white p-6 rounded-2xl shadow-lg shadow-blue-500/15 relative overflow-hidden flex flex-col justify-between min-h-[140px]">
               <WalletIcon className="w-24 h-24 text-white/10 absolute -right-4 -bottom-4 pointer-events-none" />
@@ -423,8 +557,8 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                 </div>
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-slate-900">
-                  {isLoading ? '...' : (summary?.totalExpense || 0).toLocaleString('vi-VN')} đ
+                <h2 className="text-2xl font-bold text-rose-600">
+                  {isLoading ? '...' : `-${Math.abs(summary?.totalExpense || 0).toLocaleString('vi-VN')} đ`}
                 </h2>
                 {summary && (
                   <div className="mt-3 space-y-1">
@@ -442,143 +576,255 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
               </div>
             </div>
 
-            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between min-h-[140px]">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-slate-500">Dòng tiền ròng</p>
-                <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-                  <DollarSign className="w-4 h-4" />
-                </div>
-              </div>
-              <div>
-                <h2 className={`text-2xl font-bold ${(summary?.netSaving ?? 0) >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                  {isLoading ? '...' : (summary?.netSaving || 0).toLocaleString('vi-VN')} đ
-                </h2>
-                <p className="mt-3 text-[11px] text-slate-400">Thu nhập trừ chi tiêu trong kỳ</p>
-              </div>
-            </div>
           </div>
 
           {/* Middle Grid: Cashflow Chart + Monthly Budget */}
           <div className="grid lg:grid-cols-12 gap-5">
             {/* Cashflow Chart (8 cols) */}
-            <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-6">
+            <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+              <div className="flex items-center justify-between mb-5">
                 <div>
                   <h3 className="font-bold text-base text-slate-900">Xu hướng dòng tiền</h3>
-                  <p className="text-xs text-slate-400">Thu nhập vs Chi tiêu hàng ngày</p>
+                  <p className="text-xs text-slate-500 mt-1">So sánh thu nhập và chi tiêu đã xác nhận theo ngày</p>
                 </div>
-                <select className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 outline-none">
-                  <option>7 ngày qua</option>
-                  <option>30 ngày qua</option>
-                  <option>Tháng này</option>
+                <select
+                  value={cashflowDays}
+                  onChange={(event) => setCashflowDays(Number(event.target.value))}
+                  className="h-9 px-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-[#635BFF]"
+                >
+                  <option value={7}>7 ngày qua</option>
+                  <option value={30}>30 ngày qua</option>
+                  <option value={new Date().getDate()}>Tháng này</option>
                 </select>
               </div>
 
-              {/* Bar Chart from API */}
-              <div className="h-48 flex items-end justify-between gap-3 px-2 pt-4 border-b border-slate-100 pb-2">
-                {cashflow.length > 0 ? cashflow.map((item, i) => {
-                  const maxValue = Math.max(...cashflow.map(c => Math.max(c.income ?? 0, c.expense ?? 0)));
-                  const incomeHeight = maxValue > 0 ? ((item.income ?? 0) / maxValue) * 100 : 0;
-                  const expenseHeight = maxValue > 0 ? ((item.expense ?? 0) / maxValue) * 100 : 0;
-
-                  return (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-2 group">
-                      <div className="w-full flex items-end justify-center gap-1 h-36">
-                        <div
-                          style={{ height: `${incomeHeight}%` }}
-                          className="w-1/2 bg-blue-200 rounded-t-sm group-hover:bg-blue-300 transition-all"
-                          title={`Thu nhập: ${(item.income ?? 0).toLocaleString('vi-VN')} đ`}
-                        />
-                        <div
-                          style={{ height: `${expenseHeight}%` }}
-                          className="w-1/2 bg-blue-600 rounded-t-sm group-hover:bg-blue-700 transition-all"
-                          title={`Chi tiêu: ${(item.expense ?? 0).toLocaleString('vi-VN')} đ`}
-                        />
-                      </div>
-                      <span className="text-[11px] font-semibold text-slate-400">
-                        {item.date ? new Date(item.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : ''}
-                      </span>
-                    </div>
-                  );
-                }) : (
-                  <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
-                    Chưa có dữ liệu dòng tiền
+              {cashflow.length > 0 ? (
+                <div>
+                  <div className="relative h-[270px] rounded-xl bg-slate-50/60 border border-slate-100 p-3">
+                    <svg
+                      viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                      preserveAspectRatio="xMidYMid meet"
+                      className="w-full h-full overflow-visible"
+                      aria-label="Biểu đồ xu hướng dòng tiền"
+                    >
+                      <defs>
+                        <linearGradient id="dashboard-income-area" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#12B76A" stopOpacity="0.22" />
+                          <stop offset="100%" stopColor="#12B76A" stopOpacity="0" />
+                        </linearGradient>
+                        <linearGradient id="dashboard-expense-area" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#F04438" stopOpacity="0.18" />
+                          <stop offset="100%" stopColor="#F04438" stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      {[0, 0.25, 0.5, 0.75, 1].map(level => {
+                        const y = chartBaseY - level * (chartBaseY - chartTop);
+                        return (
+                          <g key={level}>
+                            <line
+                              x1={chartLeft}
+                              x2={chartWidth - chartRight}
+                              y1={y}
+                              y2={y}
+                              stroke="#E7EAF0"
+                              strokeDasharray="4 5"
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <text
+                              x={chartLeft - 10}
+                              y={y + 4}
+                              textAnchor="end"
+                              fill="#98A2B3"
+                              fontSize="10"
+                              fontWeight="600"
+                            >
+                              {formatChartMoney(cashflowMax * level)}
+                            </text>
+                          </g>
+                        );
+                      })}
+                      <line
+                        x1={chartLeft}
+                        x2={chartLeft}
+                        y1={chartTop}
+                        y2={chartBaseY}
+                        stroke="#D0D5DD"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        x1={chartLeft}
+                        x2={chartWidth - chartRight}
+                        y1={chartBaseY}
+                        y2={chartBaseY}
+                        stroke="#D0D5DD"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <polygon
+                        points={`${chartLeft},${chartBaseY} ${chartPoints('income')} ${chartWidth - chartRight},${chartBaseY}`}
+                        fill="url(#dashboard-income-area)"
+                      />
+                      <polygon
+                        points={`${chartLeft},${chartBaseY} ${chartPoints('expense')} ${chartWidth - chartRight},${chartBaseY}`}
+                        fill="url(#dashboard-expense-area)"
+                      />
+                      <polyline
+                        points={chartPoints('income')}
+                        fill="none"
+                        stroke="#12B76A"
+                        strokeWidth="3"
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <polyline
+                        points={chartPoints('expense')}
+                        fill="none"
+                        stroke="#F04438"
+                        strokeWidth="3"
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      {chartLabelIndexes.map(index => {
+                        const item = cashflow[index];
+                        const x = cashflow.length <= 1
+                          ? (chartLeft + chartWidth - chartRight) / 2
+                          : chartLeft + index / (cashflow.length - 1) * (chartWidth - chartLeft - chartRight);
+                        return (
+                          <text
+                            key={item.date}
+                            x={x}
+                            y={chartHeight - 8}
+                            textAnchor="middle"
+                            fill="#98A2B3"
+                            fontSize="10"
+                            fontWeight="600"
+                          >
+                            {new Date(item.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}
+                          </text>
+                        );
+                      })}
+                    </svg>
                   </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-center gap-6 pt-4 text-xs font-semibold text-slate-600">
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-sm bg-blue-200" />
-                  <span>Thu nhập</span>
+                  <div className="flex items-center justify-center gap-7 pt-4 text-xs font-semibold text-slate-600">
+                    <span className="flex items-center gap-2"><i className="w-3 h-3 rounded-full bg-[#12B76A]" /> Thu nhập</span>
+                    <span className="flex items-center gap-2"><i className="w-3 h-3 rounded-full bg-[#F04438]" /> Chi tiêu</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-sm bg-blue-600" />
-                  <span>Chi tiêu</span>
+              ) : (
+                <div className="h-[285px] rounded-xl border border-dashed border-slate-300 bg-slate-50/60 flex flex-col items-center justify-center text-center">
+                  <TrendingUp className="w-8 h-8 text-[#635BFF] mb-3" />
+                  <strong className="text-sm text-slate-700">Chưa có dữ liệu dòng tiền</strong>
+                  <p className="text-xs text-slate-400 mt-1">Giao dịch đã xác nhận sẽ được hiển thị tại đây.</p>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Monthly Budget (4 cols) */}
             <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-base text-slate-900">Ngân sách tháng</h3>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      Ngân sách tháng {budgetSummary?.month || new Date().getMonth() + 1}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">Tiến độ tổng và từng mục tiêu</p>
+                  </div>
                   <button className="text-slate-400 hover:text-slate-600">
                     <MoreHorizontal className="w-5 h-5" />
                   </button>
                 </div>
 
-                <div className="space-y-4">
-                  {budgetProgress.length > 0 ? budgetProgress.slice(0, 3).map((bp) => {
-                    const isOver = bp.isOverBudget;
-                    const percentage = bp.percentUsed;
-
-                    return (
-                      <div key={bp.budgetId} className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-semibold text-slate-800">{bp.budgetName}</span>
-                          <span className={`text-sm font-bold ${isOver ? 'text-rose-600' : 'text-slate-600'}`}>
-                            {percentage.toFixed(0)}%
-                          </span>
+                {budgetSummary ? (
+                  <div className="space-y-5">
+                    <div className="rounded-xl border border-[#E7EAF0] bg-[#F7F8FC] p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] font-semibold text-slate-500">Đã sử dụng</p>
+                          <p className="mt-1 text-lg font-extrabold text-slate-900">
+                            {money(budgetSummary.spentAmount)}
+                            <span className="ml-1 text-xs font-medium text-slate-500">
+                              / {money(budgetSummary.targetAmount)}
+                            </span>
+                          </p>
                         </div>
-                        <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              isOver
-                                ? 'bg-rose-500'
-                                : percentage >= 80
-                                ? 'bg-amber-400'
-                                : 'bg-emerald-500'
-                            }`}
-                            style={{ width: `${Math.min(percentage, 100)}%` }}
-                          />
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-slate-500">
-                            Đã dùng {bp.spentAmount.toLocaleString('vi-VN')} đ / {bp.totalTargetAmount.toLocaleString('vi-VN')} đ
-                          </span>
-                          <span className={`text-xs font-semibold flex items-center gap-1 ${isOver ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            {isOver ? (
-                              <>
-                                <AlertCircle className="w-3 h-3" />
-                                Vượt {Math.abs(bp.remainingAmount).toLocaleString('vi-VN')} đ
-                              </>
-                            ) : (
-                              <>Còn lại {bp.remainingAmount.toLocaleString('vi-VN')} đ</>
-                            )}
-                          </span>
-                        </div>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                          budgetPercent >= 100
+                            ? 'bg-rose-50 text-rose-600'
+                            : budgetPercent >= budgetSummary.warningThresholdPercent
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-[#F1EFFF] text-[#5147E5]'
+                        }`}>
+                          {budgetPercent.toLocaleString('vi-VN', { maximumFractionDigits: 1 })}%
+                        </span>
                       </div>
-                    );
-                  }) : (
+                      <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-[#EAECF0]">
+                        <div
+                          className={`h-full rounded-full transition-all ${budgetTone}`}
+                          style={{ width: `${Math.min(budgetPercent, 100)}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
+                        <span className="text-slate-500">{budgetSummary.transactionCount} giao dịch đã xác nhận</span>
+                        <strong className={budgetSummary.remainingAmount < 0 ? 'text-rose-600' : 'text-emerald-700'}>
+                          {budgetSummary.remainingAmount < 0
+                            ? `Vượt ${money(Math.abs(budgetSummary.remainingAmount))}`
+                            : `Còn ${money(budgetSummary.remainingAmount)}`}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-3 flex items-center justify-between">
+                        <h4 className="text-sm font-bold text-slate-900">Tiến độ từng target</h4>
+                        <span className="text-[11px] font-semibold text-slate-400">
+                          {monthlyBudget?.allocations.length || 0} mục tiêu
+                        </span>
+                      </div>
+                      <div className="max-h-[180px] space-y-3 overflow-y-auto pr-1">
+                        {monthlyBudget?.allocations.length ? monthlyBudget.allocations.map((target) => {
+                          const percent = Math.max(0, target.usagePercent || 0);
+                          const isOver = percent >= 100;
+                          const isWarning = !isOver && percent >= budgetSummary.warningThresholdPercent;
+                          return (
+                            <div key={target.id} className="rounded-xl border border-slate-100 p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="truncate text-xs font-bold text-slate-800">
+                                  {target.name || target.tagName || 'Mục tiêu'}
+                                </span>
+                                <span className={`text-xs font-bold ${isOver ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-[#5147E5]'}`}>
+                                  {percent.toLocaleString('vi-VN', { maximumFractionDigits: 1 })}%
+                                </span>
+                              </div>
+                              <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#EAECF0]">
+                                <div
+                                  className={`h-full rounded-full ${isOver ? 'bg-rose-500' : isWarning ? 'bg-amber-500' : 'bg-[#635BFF]'}`}
+                                  style={{ width: `${Math.min(percent, 100)}%` }}
+                                />
+                              </div>
+                              <div className="mt-1.5 flex justify-between text-[10px] font-medium text-slate-500">
+                                <span>Đã dùng {money(target.spentAmount)}</span>
+                                <span>Mục tiêu {money(target.targetAmount)}</span>
+                              </div>
+                            </div>
+                          );
+                        }) : (
+                          <p className="rounded-xl bg-slate-50 px-3 py-5 text-center text-xs text-slate-400">
+                            Chưa có target ngân sách.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
                     <div className="text-center py-8">
                       <PiggyBank className="w-10 h-10 mx-auto text-slate-300 mb-2" />
                       <p className="text-sm text-slate-400">Chưa có ngân sách nào</p>
                       <p className="text-xs text-slate-400 mt-1">Tạo ngân sách để theo dõi chi tiêu</p>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
               <button
@@ -638,7 +884,7 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                         <td className="py-4 px-6">
                           <span className="text-xs text-slate-500">{wallets.find(w => w.id === tx.walletId)?.name || '—'}</span>
                         </td>
-                        <td className={`py-4 px-6 text-right font-bold text-sm whitespace-nowrap ${isExpense ? 'text-slate-900' : 'text-emerald-600'}`}>
+                        <td className={`py-4 px-6 text-right font-bold text-sm whitespace-nowrap ${isExpense ? 'text-rose-600' : 'text-emerald-600'}`}>
                           {isExpense ? '' : '+'}{tx.amount.toLocaleString('vi-VN')} đ
                         </td>
                       </tr>
@@ -646,44 +892,6 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                   })}
                 </tbody>
               </table>
-            </div>
-          </div>
-
-          {/* Bottom Financial Ratios */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm text-center">
-              <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-2">
-                <PiggyBank className="w-4 h-4" />
-              </div>
-              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Tỷ lệ tiết kiệm</p>
-              <h4 className="text-2xl font-black text-slate-900">{ratios?.savingsRate ?? 0}%</h4>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm text-center">
-              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-2">
-                <Award className="w-4 h-4" />
-              </div>
-              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Chi tiêu/TN</p>
-              <h4 className="text-2xl font-black text-slate-900">{ratios?.expenseToIncomeRatio ?? 0}%</h4>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm text-center">
-              <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-2">
-                <Landmark className="w-4 h-4" />
-              </div>
-              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Quỹ khẩn cấp</p>
-              <h4 className="text-2xl font-black text-slate-900">{ratios?.emergencyFundRatio ?? 0}x</h4>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm text-center">
-              <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-2">
-                <TrendingDown className="w-4 h-4" />
-              </div>
-              <p className="text-[11px] font-medium text-slate-500 mb-0.5">Chi tiêu TB/ngày</p>
-              <h4 className="text-2xl font-black text-slate-900">
-                {summary?.averageDailyExpense ? Math.round(summary.averageDailyExpense).toLocaleString('vi-VN') : 0}
-                <span className="text-xs font-normal text-slate-400 ml-1">đ</span>
-              </h4>
             </div>
           </div>
         </main>

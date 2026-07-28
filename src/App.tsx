@@ -4,6 +4,7 @@ import { LandingScreen } from './components/screens/LandingScreen';
 import { UserDashboardScreen } from './components/screens/UserDashboardScreen';
 import { TransactionsWalletsScreen } from './components/screens/TransactionsWalletsScreen';
 import { AIProcessingScreen } from './components/screens/AIProcessingScreen';
+import { AIImageTransactionScreen } from './components/screens/AIImageTransactionScreen';
 import { BudgetRoadmapScreen } from './components/screens/BudgetRoadmapScreen';
 import { DebtReminderScreen } from './components/screens/DebtReminderScreen';
 import { AdminTokenScreen } from './components/screens/AdminTokenScreen';
@@ -80,6 +81,9 @@ function AppContent() {
       )}
       {currentScreen === 'ai-input' && (
         <AIProcessingScreen onNavigate={handleNavigate} />
+      )}
+      {currentScreen === 'ai-image' && (
+        <AIImageTransactionScreen onNavigate={handleNavigate} />
       )}
       {currentScreen === 'budget' && (
         <BudgetRoadmapScreen onNavigate={handleNavigate} />

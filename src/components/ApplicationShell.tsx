@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Bell,
   Bot,
@@ -17,6 +17,10 @@ import {
   WalletCards,
   X,
   Crown,
+  ChevronDown,
+  ImagePlus,
+  PencilLine,
+  Sparkles,
 } from 'lucide-react';
 import { ScreenId } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -37,6 +41,7 @@ const navigation = [
 ];
 
 const pageNames: Partial<Record<ScreenId, string>> = {
+  'ai-image': 'Nhập ảnh giao dịch bằng AI',
   dashboard: 'Tổng quan',
   transactions: 'Giao dịch & Ví',
   wallets: 'Ví',
@@ -57,10 +62,21 @@ export function ApplicationShell({
   const { user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const closeMenu = (event: MouseEvent) => {
+      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false);
+    };
+    document.addEventListener('mousedown', closeMenu);
+    return () => document.removeEventListener('mousedown', closeMenu);
+  }, []);
 
   const navigate = (screen: ScreenId) => {
     onNavigate(screen);
     setDrawerOpen(false);
+    setAddMenuOpen(false);
   };
 
   const sidebar = (
@@ -82,10 +98,33 @@ export function ApplicationShell({
         </button>
       </div>
 
-      <button className="flowfi-add-button" onClick={() => navigate('ai-input')}>
+      <div className={`flowfi-add-control ${addMenuOpen ? 'open' : ''}`} ref={addMenuRef}>
+      <button
+        className="flowfi-add-button"
+        onClick={() => setAddMenuOpen(value => !value)}
+        aria-expanded={addMenuOpen}
+        aria-haspopup="menu"
+      >
         <Plus />
         {!collapsed && <span>Thêm giao dịch</span>}
+        {!collapsed && <ChevronDown className="flowfi-add-chevron" />}
       </button>
+
+      {addMenuOpen && (
+        <div className="flowfi-add-menu" role="menu">
+          <button role="menuitem" onClick={() => navigate('ai-input')}>
+            <i><PencilLine /></i>
+            <span><strong>Nhập giao dịch nhanh</strong><small>Nhập số tiền và danh mục</small></span>
+            <ChevronRight />
+          </button>
+          <button role="menuitem" onClick={() => navigate('ai-image')}>
+            <i className="ai"><ImagePlus /></i>
+            <span><strong>Nhập ảnh bằng AI</strong><small>Quét hóa đơn hoặc ảnh chuyển khoản</small></span>
+            <Sparkles />
+          </button>
+        </div>
+      )}
+      </div>
 
       <nav className="flowfi-navigation" aria-label="Điều hướng chính">
         {navigation.map((item, index) => {

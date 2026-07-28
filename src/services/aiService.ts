@@ -2,6 +2,7 @@ import { apiClient } from './apiClient';
 import type {
   AiProcessingRequestDto,
   AiProcessingResultDto,
+  ImageTransactionResponseDto,
 } from '../types/api';
 
 export interface VoiceTranscriptionResponse {
@@ -109,7 +110,7 @@ export const imageAiService = {
 
   // POST /api/ai/images/transactions
   // Create transaction from receipt image
-  createTransaction: async (walletId: string, imageFile: File, mockText?: string): Promise<AiProcessingResultDto> => {
+  createTransaction: async (walletId: string, imageFile: File, mockText?: string): Promise<ImageTransactionResponseDto> => {
     const formData = new FormData();
     formData.append('Image', imageFile);
     formData.append('WalletId', walletId);
@@ -117,7 +118,7 @@ export const imageAiService = {
       formData.append('MockExtractedText', mockText);
     }
 
-    const response = await apiClient.post<AiProcessingResultDto>(
+    const response = await apiClient.post<ImageTransactionResponseDto>(
       '/api/ai/images/transactions',
       formData,
       {
@@ -126,7 +127,24 @@ export const imageAiService = {
         },
       }
     );
-    return response.data;
+    // AI service historically exposed `transactionType` while the Finance REST
+    // contract uses `type`. Normalize both versions here so draft edit/confirm
+    // always sends the required transaction type.
+    return {
+      ...response.data,
+      createdTransactions: response.data.createdTransactions.map((item) => {
+        const transaction = item.transaction as typeof item.transaction & {
+          transactionType?: string;
+        };
+        return {
+          ...item,
+          transaction: {
+            ...transaction,
+            type: transaction.type || transaction.transactionType || item.tag.transactionType,
+          },
+        };
+      }),
+    };
   },
 };
 

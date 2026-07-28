@@ -135,6 +135,7 @@ export interface TransactionDto {
   tagName?: string;
   amount: number;
   type: string;  // INCOME, EXPENSE
+  status: 'DRAFT' | 'CONFIRMED';
   title: string;
   note?: string;
   source: string;  // MANUAL, AI, IMPORT, RECURRING
@@ -149,6 +150,7 @@ export interface CreateTransactionRequest {
   tagId?: string;
   amount: number;
   type: string;
+  status?: 'DRAFT' | 'CONFIRMED';
   title: string;
   note?: string;
   source?: string;
@@ -161,6 +163,7 @@ export interface TransactionQuery {
   walletId?: string;
   tagId?: string;
   type?: 'INCOME' | 'EXPENSE';
+  status?: 'DRAFT' | 'CONFIRMED';
   from?: string;
   to?: string;
 }
@@ -456,6 +459,49 @@ export interface AiProcessingResultDto {
   confidence?: number;
   errorMessage?: string;
   processedAt: string;
+}
+
+export interface ImageAnalyzedTransactionDto {
+  title: string;
+  amount?: number;
+  transactionType?: 'INCOME' | 'EXPENSE';
+  tagName: string;
+  tag?: string;
+  note: string;
+  transactionDate?: string;
+  merchantName?: string;
+  rawText: string;
+  confidence: number;
+}
+
+export interface ImageAnalysisDto {
+  imageType: string;
+  confidence: number;
+  transactions: ImageAnalyzedTransactionDto[];
+  warnings: string[];
+  rawResponse: string;
+}
+
+export interface FinanceTagDto {
+  id: string;
+  name: string;
+  transactionType: string;
+  icon: string;
+  color: string;
+}
+
+export interface FinanceTransactionCreationResultDto {
+  tag: FinanceTagDto;
+  tagCreated: boolean;
+  transaction: TransactionDto & { status: string };
+}
+
+export interface ImageTransactionResponseDto {
+  aiRequestId: string;
+  aiResultId?: string;
+  imageUrl: string;
+  analysis: ImageAnalysisDto;
+  createdTransactions: FinanceTransactionCreationResultDto[];
 }
 
 // Admin DTOs
