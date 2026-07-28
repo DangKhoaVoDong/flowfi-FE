@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScreenId } from '../../types';
-import { useAuth } from '../../context/AuthContext';
 import { paymentObligationService, tagService, walletService } from '../../services';
 import type {
   CreatePaymentObligationDto,
@@ -12,9 +11,19 @@ import type {
   WalletDto,
 } from '../../types/api';
 import {
-  LayoutDashboard, CreditCard, Bot, PieChart, Settings, HelpCircle,
-  Bell, Plus, Calendar, X, Trash2, Loader2, Pencil, CheckCircle2,
-  Clock, AlertCircle, DollarSign, Wallet, SkipForward, FileText
+  AlertCircle,
+  Bell,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  FileText,
+  Loader2,
+  Pencil,
+  Plus,
+  SkipForward,
+  Trash2,
+  Wallet,
+  X,
 } from 'lucide-react';
 
 interface DebtReminderScreenProps {
@@ -25,20 +34,36 @@ interface ObligationFormState {
   title: string;
   walletId: string;
   tagId: string;
-  totalAmount: string;
+  amountPerCycle: string;
   cycleCount: string;
-  frequency: PaymentObligationFrequency;
+  intervalCount: string;
+  frequencyUnit: PaymentFrequencyUnit;
   firstDueAt: string;
   reminderDaysBefore: string;
   note: string;
   isActive: boolean;
 }
 
-const FREQUENCY_LABELS: Record<PaymentObligationFrequency, string> = {
-  ONCE: 'Một lần',
-  WEEKLY: 'Hàng tuần',
-  MONTHLY: 'Hàng tháng',
-  YEARLY: 'Hàng năm',
+interface ObligationProgress {
+  totalCycles: number;
+  paidCycles: number;
+  remainingCycles: number;
+  paidAmount: number;
+  remainingAmount: number;
+}
+
+type PaymentFrequencyUnit = 'DAILY' | 'MONTHLY' | 'YEARLY';
+
+const FREQUENCY_UNIT_LABELS: Record<PaymentFrequencyUnit, string> = {
+  DAILY: 'Ngày',
+  MONTHLY: 'Tháng',
+  YEARLY: 'Năm',
+};
+
+const FREQUENCY_UNIT_DISPLAY: Record<PaymentFrequencyUnit, string> = {
+  DAILY: 'ngày',
+  MONTHLY: 'tháng',
+  YEARLY: 'năm',
 };
 
 const STATUS_LABELS: Record<PaymentObligationPaymentStatus, string> = {
@@ -53,9 +78,10 @@ const emptyForm = (walletId = ''): ObligationFormState => ({
   title: '',
   walletId,
   tagId: '',
-  totalAmount: '',
+  amountPerCycle: '',
   cycleCount: '1',
-  frequency: 'ONCE',
+  intervalCount: '1',
+  frequencyUnit: 'MONTHLY',
   firstDueAt: new Date().toISOString().split('T')[0],
   reminderDaysBefore: '3',
   note: '',
@@ -74,6 +100,34 @@ const formatMoney = (amount: number) => `${Number(amount || 0).toLocaleString('v
 const formatDate = (value?: string) =>
   value ? new Date(value).toLocaleDateString('vi-VN') : 'Chưa có';
 
+const normalizeScheduleForForm = (
+  frequency: PaymentObligationFrequency,
+  intervalCount?: number
+): { intervalCount: string; frequencyUnit: PaymentFrequencyUnit } => {
+  const safeInterval = Number(intervalCount || 1);
+  const normalizedInterval = safeInterval >= 1 && safeInterval <= 365 ? safeInterval : 1;
+
+  if (frequency === 'WEEKLY') {
+    return { intervalCount: '7', frequencyUnit: 'DAILY' };
+  }
+
+  if (frequency === 'DAILY' || frequency === 'MONTHLY' || frequency === 'YEARLY') {
+    return { intervalCount: String(normalizedInterval), frequencyUnit: frequency };
+  }
+
+  return { intervalCount: '1', frequencyUnit: 'MONTHLY' };
+};
+
+const formatPaymentFrequency = (
+  frequency: PaymentObligationFrequency,
+  intervalCount?: number
+) => {
+  if (frequency === 'ONCE') return 'Một lần';
+
+  const schedule = normalizeScheduleForForm(frequency, intervalCount);
+  return `Mỗi ${schedule.intervalCount} ${FREQUENCY_UNIT_DISPLAY[schedule.frequencyUnit]}`;
+};
+
 const daysUntil = (value?: string) => {
   if (!value) return 0;
   const today = new Date();
@@ -86,8 +140,25 @@ const daysUntil = (value?: string) => {
 const isOpenPayment = (status: PaymentObligationPaymentStatus) =>
   status !== 'PAID' && status !== 'SKIPPED';
 
-export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNavigate }) => {
-  const { user } = useAuth();
+const calculateProgress = (
+  obligation: PaymentObligationDto,
+  payments: PaymentObligationPaymentDto[]
+): ObligationProgress => {
+  const paidPayments = payments.filter((payment) => payment.status === 'PAID');
+  const paidAmount = paidPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const totalCycles = Number(obligation.cycleCount || payments.length || 0);
+  const paidCycles = paidPayments.length;
+
+  return {
+    totalCycles,
+    paidCycles,
+    remainingCycles: Math.max(0, totalCycles - paidCycles),
+    paidAmount,
+    remainingAmount: Math.max(0, Number(obligation.totalAmount || 0) - paidAmount),
+  };
+};
+
+export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [obligations, setObligations] = useState<PaymentObligationDto[]>([]);
@@ -98,6 +169,7 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
   const [showForm, setShowForm] = useState(false);
   const [editingObligation, setEditingObligation] = useState<PaymentObligationDto | null>(null);
   const [form, setForm] = useState<ObligationFormState>(emptyForm());
+  const [processingPaymentIds, setProcessingPaymentIds] = useState<Set<string>>(() => new Set());
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -189,6 +261,9 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
   const selectedObligation = obligations.find((item) => item.id === selectedObligationId) || null;
   const selectedPayments = [...(selectedObligation ? paymentsByObligation[selectedObligation.id] || [] : [])]
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+  const selectedProgress = selectedObligation
+    ? calculateProgress(selectedObligation, selectedPayments)
+    : null;
 
   const getWalletName = (walletId: string) =>
     wallets.find((wallet) => wallet.id === walletId)?.name || 'Ví không xác định';
@@ -203,14 +278,17 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
   };
 
   const openEditForm = (obligation: PaymentObligationDto) => {
+    const schedule = normalizeScheduleForForm(obligation.frequency, obligation.intervalCount);
+
     setEditingObligation(obligation);
     setForm({
       title: obligation.title,
       walletId: obligation.walletId,
       tagId: obligation.tagId || '',
-      totalAmount: String(obligation.totalAmount),
+      amountPerCycle: String(obligation.amountPerCycle),
       cycleCount: String(obligation.cycleCount),
-      frequency: obligation.frequency,
+      intervalCount: schedule.intervalCount,
+      frequencyUnit: schedule.frequencyUnit,
       firstDueAt: toDateInput(obligation.firstDueAt),
       reminderDaysBefore: String(obligation.reminderDaysBefore),
       note: obligation.note || '',
@@ -225,14 +303,20 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
     setForm(emptyForm(wallets[0]?.id || ''));
   };
 
+  const amountPerCycle = Number(form.amountPerCycle);
+  const cycleCount = Number(form.cycleCount);
+  const intervalCount = Number(form.intervalCount);
+  const estimatedTotalAmount = amountPerCycle > 0 && cycleCount > 0 ? amountPerCycle * cycleCount : 0;
+
   const buildPayload = (): CreatePaymentObligationDto => ({
     walletId: form.walletId,
     tagId: form.tagId || undefined,
-    totalAmount: Number(form.totalAmount),
-    cycleCount: Number(form.cycleCount),
+    totalAmount: estimatedTotalAmount,
+    cycleCount,
     title: form.title.trim(),
     note: form.note.trim() || undefined,
-    frequency: form.frequency,
+    frequency: form.frequencyUnit,
+    intervalCount,
     firstDueAt: toVietnamOffset(form.firstDueAt),
     reminderDaysBefore: Number(form.reminderDaysBefore),
     isActive: form.isActive,
@@ -240,12 +324,12 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!form.walletId || !form.title.trim() || Number(form.totalAmount) <= 0) {
-      alert('Vui lòng nhập tên khoản nợ, ví và số tiền hợp lệ.');
+    if (!form.walletId || !form.title.trim() || amountPerCycle <= 0) {
+      alert('Vui lòng nhập tên khoản nợ, ví và số tiền mỗi kỳ hợp lệ.');
       return;
     }
-    if (Number(form.cycleCount) > 1 && form.frequency === 'ONCE') {
-      alert('Khoản trả nhiều kỳ cần chọn tần suất hàng tuần, hàng tháng hoặc hàng năm.');
+    if (intervalCount < 1 || intervalCount > 365) {
+      alert('Vui lòng nhập chu kỳ trả từ 1 đến 365.');
       return;
     }
 
@@ -279,22 +363,38 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
   };
 
   const handlePay = async (payment: PaymentObligationPaymentDto) => {
+    if (processingPaymentIds.has(payment.id)) return;
+    setProcessingPaymentIds((current) => new Set(current).add(payment.id));
     try {
       await paymentObligationService.payPayment(payment.id, { paidAt: new Date().toISOString() });
       await fetchData();
     } catch (error) {
       console.error('Error paying payment obligation:', error);
       alert('Không thể đánh dấu đã trả.');
+    } finally {
+      setProcessingPaymentIds((current) => {
+        const next = new Set(current);
+        next.delete(payment.id);
+        return next;
+      });
     }
   };
 
   const handleSkip = async (payment: PaymentObligationPaymentDto) => {
+    if (processingPaymentIds.has(payment.id)) return;
+    setProcessingPaymentIds((current) => new Set(current).add(payment.id));
     try {
       await paymentObligationService.skipPayment(payment.id);
       await fetchData();
     } catch (error) {
       console.error('Error skipping payment obligation:', error);
       alert('Không thể bỏ qua kỳ trả này.');
+    } finally {
+      setProcessingPaymentIds((current) => {
+        const next = new Set(current);
+        next.delete(payment.id);
+        return next;
+      });
     }
   };
 
@@ -305,359 +405,447 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
       return 'bg-rose-50 text-rose-700 border-rose-200';
     }
     if (payment.status === 'REMINDED') return 'bg-amber-50 text-amber-700 border-amber-200';
-    return 'bg-blue-50 text-blue-700 border-blue-200';
+    return 'bg-amber-50 text-amber-700 border-amber-200';
+  };
+
+  const dueLabel = (value?: string) => {
+    const dueIn = daysUntil(value);
+    if (dueIn < 0) return `Trễ ${Math.abs(dueIn)} ngày`;
+    if (dueIn === 0) return 'Hôm nay';
+    return `${dueIn} ngày nữa`;
+  };
+
+  const dueLabelClass = (value?: string) => {
+    const dueIn = daysUntil(value);
+    if (dueIn < 0) return 'text-rose-600';
+    if (dueIn <= 7) return 'text-orange-600';
+    return 'text-slate-500';
+  };
+
+  const paymentDueHint = (value?: string) => {
+    const dueIn = daysUntil(value);
+    if (dueIn < 0) return `Đã quá hạn ${Math.abs(dueIn)} ngày`;
+    if (dueIn === 0) return 'Đến hạn hôm nay';
+    return `Còn ${dueIn} ngày`;
   };
 
   return (
-    <div className="min-h-screen bg-[#F4F6FA] text-slate-900 font-sans flex">
-      <aside className="w-64 bg-white border-r border-slate-200/80 flex flex-col shrink-0 hidden md:flex">
-        <div className="h-16 px-6 flex items-center gap-2.5 border-b border-slate-100">
-          <div className="w-8 h-8 rounded-xl bg-blue-600 text-white font-black flex items-center justify-center text-sm shadow-sm">
-            F
+    <div className="min-h-[calc(100vh-70px)] bg-[#f7f9fe] text-[#101828]">
+      <main className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h1 className="text-[28px] font-black leading-tight tracking-normal text-[#101828] sm:text-[32px]">
+              Lịch trả nợ
+            </h1>
+            <p className="mt-1 text-sm text-[#667085]">
+              Theo dõi các khoản nợ, ngày đến hạn và trạng thái từng kỳ.
+            </p>
           </div>
-          <span className="font-bold text-xl tracking-tight text-blue-600">FlowFi</span>
+          <div className="inline-flex w-fit items-center gap-2 rounded-[10px] bg-white px-3 py-2 text-sm font-bold text-[#344054] shadow-[0_1px_2px_rgba(16,24,40,0.05)] ring-1 ring-[#e7eaf0]">
+            <Calendar className="h-4 w-4 text-[#475467]" />
+            <span>Hôm nay: {new Date().toLocaleDateString('vi-VN')}</span>
+          </div>
         </div>
 
-        <div className="p-4 space-y-1 flex-1">
-          <button
-            onClick={() => onNavigate('dashboard')}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            <span>Tổng quan</span>
-          </button>
-          <button
-            onClick={() => onNavigate('transactions')}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
-          >
-            <CreditCard className="w-4 h-4" />
-            <span>Giao dịch</span>
-          </button>
-          <button
-            onClick={() => onNavigate('ai-input')}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
-          >
-            <Bot className="w-4 h-4" />
-            <span>Trợ lý AI</span>
-          </button>
-          <button
-            onClick={() => onNavigate('budget')}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors"
-          >
-            <PieChart className="w-4 h-4" />
-            <span>Ngân sách</span>
-          </button>
-          <button
-            onClick={() => onNavigate('debt-reminders')}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 shadow-sm shadow-blue-500/20"
-          >
-            <Bell className="w-4 h-4" />
-            <span>Nhắc nợ</span>
-          </button>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <article className="min-h-[132px] rounded-[14px] bg-gradient-to-br from-[#7c5cff] to-[#4f46e5] p-5 text-white shadow-[0_12px_28px_rgba(91,77,245,0.22)]">
+            <div className="flex h-full items-center gap-5">
+              <span className="grid h-[58px] w-[58px] shrink-0 place-items-center rounded-[14px] bg-white/95 text-[#5b4df5]">
+                <Wallet className="h-7 w-7" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white/85">Tổng dư nợ</p>
+                <strong className="mt-2 block truncate text-[28px] font-black leading-tight">
+                  {formatMoney(stats.outstanding)}
+                </strong>
+              </div>
+            </div>
+          </article>
+
+          <article className="min-h-[132px] rounded-[14px] border border-[#e7eaf0] bg-white p-5 shadow-[0_8px_20px_rgba(16,24,40,0.04)]">
+            <div className="flex h-full items-center gap-4">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-orange-50 text-orange-500">
+                <Clock className="h-6 w-6" />
+              </span>
+              <div>
+                <p className="text-sm font-medium text-[#344054]">Đến hạn 7 ngày</p>
+                <strong className="mt-2 block text-[28px] font-black leading-none text-[#101828]">
+                  {stats.dueSoon}
+                </strong>
+                <span className="mt-2 block text-xs text-[#667085]">kỳ trả cần chú ý</span>
+              </div>
+            </div>
+          </article>
+
+          <article className="min-h-[132px] rounded-[14px] border border-[#e7eaf0] bg-white p-5 shadow-[0_8px_20px_rgba(16,24,40,0.04)]">
+            <div className="flex h-full items-center gap-4">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-rose-50 text-rose-500">
+                <AlertCircle className="h-6 w-6" />
+              </span>
+              <div>
+                <p className="text-sm font-medium text-[#344054]">Quá hạn</p>
+                <strong className="mt-2 block text-[28px] font-black leading-none text-rose-600">
+                  {stats.overdue}
+                </strong>
+                <span className="mt-2 block text-xs text-[#667085]">kỳ trả chưa xử lý</span>
+              </div>
+            </div>
+          </article>
+
+          <article className="min-h-[132px] rounded-[14px] border border-[#e7eaf0] bg-white p-5 shadow-[0_8px_20px_rgba(16,24,40,0.04)]">
+            <div className="flex h-full items-center gap-4">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#eef4ff] text-[#2970ff]">
+                <FileText className="h-6 w-6" />
+              </span>
+              <div>
+                <p className="text-sm font-medium text-[#344054]">Đang theo dõi</p>
+                <strong className="mt-2 block text-[28px] font-black leading-none text-[#101828]">
+                  {stats.activeCount}
+                </strong>
+                <span className="mt-2 block text-xs text-[#667085]">khoản nợ đang bật nhắc</span>
+              </div>
+            </div>
+          </article>
         </div>
 
-        <div className="p-4 border-t border-slate-100 space-y-1">
-          <button className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-sm font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors">
-            <Settings className="w-4 h-4" />
-            <span>Cài đặt</span>
-          </button>
-          <button className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-sm font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors">
-            <HelpCircle className="w-4 h-4" />
-            <span>Hỗ trợ</span>
-          </button>
-        </div>
-      </aside>
-
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between gap-4 sticky top-0 z-30">
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold text-slate-900 truncate">Nhắc trả nợ</h1>
+        {isLoading ? (
+          <div className="grid min-h-[420px] place-items-center rounded-[14px] border border-[#e7eaf0] bg-white">
+            <Loader2 className="h-9 w-9 animate-spin text-[#5b4df5]" />
           </div>
-          <div className="flex items-center gap-3">
-            <button className="p-2 rounded-full hover:bg-slate-100 text-slate-600 relative">
-              <Bell className="w-4 h-4" />
-              {stats.dueSoon > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-600 rounded-full" />}
-            </button>
-            {user?.avatarUrl ? (
-              <img src={user.avatarUrl} alt={user.fullName} className="w-8 h-8 rounded-full object-cover ring-2 ring-blue-100" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold ring-2 ring-blue-100">
-                {user?.fullName?.charAt(0) || 'U'}
+        ) : (
+          <div className="grid gap-5 xl:grid-cols-[minmax(420px,0.96fr)_minmax(520px,1.04fr)]">
+            <section className="overflow-hidden rounded-[14px] border border-[#e7eaf0] bg-white shadow-[0_8px_20px_rgba(16,24,40,0.04)]">
+              <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] p-5 sm:p-6">
+                <div className="min-w-0">
+                  <h2 className="text-xl font-black leading-tight text-[#101828]">Danh sách khoản nợ</h2>
+                  <p className="mt-1 text-sm text-[#667085]">Chọn một khoản để xem lịch trả chi tiết.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openCreateForm}
+                  className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-[9px] border border-[#6f63ff] bg-white px-4 text-sm font-bold text-[#5b4df5] transition hover:bg-[#f4f2ff]"
+                >
+                  <Plus className="h-5 w-5" />
+                  <span>Thêm khoản nợ</span>
+                </button>
               </div>
-            )}
-            <span className="text-xs font-semibold text-slate-800 hidden sm:inline">{user?.fullName || 'Người dùng'}</span>
-            <button
-              onClick={openCreateForm}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs rounded-xl shadow-sm shadow-blue-500/20 flex items-center gap-1.5 transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Thêm lịch nhắc</span>
-            </button>
-          </div>
-        </header>
 
-        <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Lịch nợ & kỳ trả</h2>
-              <p className="text-xs text-slate-500">Theo dõi khoản phải trả, ngày đến hạn và trạng thái từng kỳ.</p>
-            </div>
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
-              <Calendar className="w-4 h-4 text-blue-600" />
-              <span>Hôm nay: {new Date().toLocaleDateString('vi-VN')}</span>
-            </div>
-          </div>
-
-          <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5">
-            <div className="bg-blue-600 text-white p-5 rounded-2xl shadow-lg shadow-blue-500/15 min-h-[126px] flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-blue-100">Dư nợ còn lại</p>
-                <DollarSign className="w-5 h-5 text-blue-100" />
-              </div>
-              <h3 className="text-2xl font-black tracking-tight">{formatMoney(stats.outstanding)}</h3>
-            </div>
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm min-h-[126px] flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-slate-500">Đến hạn 7 ngày</p>
-                <Clock className="w-5 h-5 text-amber-500" />
-              </div>
-              <h3 className="text-2xl font-black text-slate-900">{stats.dueSoon}</h3>
-              <p className="text-[11px] text-slate-400">kỳ trả cần chú ý</p>
-            </div>
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm min-h-[126px] flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-slate-500">Quá hạn</p>
-                <AlertCircle className="w-5 h-5 text-rose-500" />
-              </div>
-              <h3 className="text-2xl font-black text-rose-600">{stats.overdue}</h3>
-              <p className="text-[11px] text-slate-400">kỳ trả chưa xử lý</p>
-            </div>
-            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm min-h-[126px] flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-slate-500">Khoản đang theo dõi</p>
-                <FileText className="w-5 h-5 text-emerald-500" />
-              </div>
-              <h3 className="text-2xl font-black text-slate-900">{stats.activeCount}</h3>
-              <p className="text-[11px] text-slate-400">lịch nhắc đang bật</p>
-            </div>
-          </div>
-
-          {isLoading ? (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-            </div>
-          ) : (
-            <div className="grid xl:grid-cols-12 gap-5">
-              <section className="xl:col-span-7 bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              {obligations.length === 0 ? (
+                <div className="grid min-h-[360px] place-items-center px-6 py-12 text-center">
                   <div>
-                    <h3 className="font-bold text-base text-slate-900">Danh sách khoản nợ</h3>
-                    <p className="text-xs text-slate-400">Chọn một khoản để xem lịch trả chi tiết.</p>
+                    <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#f4f2ff] text-[#5b4df5]">
+                      <Bell className="h-7 w-7" />
+                    </span>
+                    <p className="mt-4 text-base font-black text-[#344054]">Chưa có lịch nhắc nợ nào</p>
+                    <p className="mt-1 text-sm text-[#667085]">Tạo lịch đầu tiên để FlowFi nhắc bạn trước hạn trả.</p>
                   </div>
-                  <button
-                    onClick={openCreateForm}
-                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Tạo mới</span>
-                  </button>
                 </div>
-
-                {obligations.length === 0 ? (
-                  <div className="p-10 text-center text-slate-400">
-                    <Bell className="w-10 h-10 mx-auto mb-3 text-slate-300" />
-                    <p className="font-semibold text-slate-500">Chưa có lịch nhắc nợ nào</p>
-                    <p className="text-xs mt-1">Tạo lịch đầu tiên để FlowFi nhắc bạn trước hạn trả.</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-slate-100">
-                    {obligations.map((obligation) => {
-                      const dueIn = daysUntil(obligation.nextDueAt);
-                      const selected = selectedObligationId === obligation.id;
-                      return (
-                        <button
-                          key={obligation.id}
-                          onClick={() => setSelectedObligationId(obligation.id)}
-                          className={`w-full text-left p-5 hover:bg-slate-50 transition-colors ${selected ? 'bg-blue-50/60' : 'bg-white'}`}
-                        >
-                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                            <div className="flex items-start gap-3 min-w-0">
-                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
-                                selected ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
-                              }`}>
-                                <Wallet className="w-5 h-5" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <h4 className="font-bold text-sm text-slate-900 truncate">{obligation.title}</h4>
-                                  {!obligation.isActive && (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">
-                                      TẮT
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-slate-500">
-                                  {getWalletName(obligation.walletId)} • {getTagName(obligation.tagId)}
-                                </p>
-                                <p className="text-[11px] text-slate-400 mt-1">
-                                  Nhắc trước {obligation.reminderDaysBefore} ngày • {FREQUENCY_LABELS[obligation.frequency]}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-between lg:justify-end gap-5">
-                              <div className="text-right">
-                                <p className="text-sm font-black text-slate-900">{formatMoney(obligation.totalAmount)}</p>
-                                <p className="text-[11px] text-slate-400">
-                                  {obligation.cycleCount} kỳ × {formatMoney(obligation.amountPerCycle)}
-                                </p>
-                              </div>
-                              <div className="text-right min-w-[96px]">
-                                <p className={`text-xs font-bold ${dueIn < 0 ? 'text-rose-600' : dueIn <= 7 ? 'text-amber-600' : 'text-slate-700'}`}>
-                                  {dueIn < 0 ? `Trễ ${Math.abs(dueIn)} ngày` : dueIn === 0 ? 'Hôm nay' : `Còn ${dueIn} ngày`}
-                                </p>
-                                <p className="text-[11px] text-slate-400">{formatDate(obligation.nextDueAt)}</p>
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-
-              <section className="xl:col-span-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <h3 className="font-bold text-base text-slate-900">Kỳ trả</h3>
-                    <p className="text-xs text-slate-400 truncate">
-                      {selectedObligation ? selectedObligation.title : 'Chọn một khoản nợ để xem lịch'}
-                    </p>
-                  </div>
-                  {selectedObligation && (
-                    <div className="flex items-center gap-1">
+              ) : (
+                <div className="space-y-0">
+                  {obligations.map((obligation) => {
+                    const selected = selectedObligationId === obligation.id;
+                    const progress = calculateProgress(
+                      obligation,
+                      paymentsByObligation[obligation.id] || []
+                    );
+                    return (
                       <button
-                        onClick={() => openEditForm(selectedObligation)}
-                        className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
-                        title="Sửa lịch nhắc"
+                        key={obligation.id}
+                        type="button"
+                        onClick={() => setSelectedObligationId(obligation.id)}
+                        className={`w-full border-b border-[#edf0f5] p-5 text-left transition last:border-b-0 ${
+                          selected
+                            ? 'border-l-4 border-l-[#6f63ff] bg-[#f7f5ff]'
+                            : 'border-l-4 border-l-transparent bg-white hover:bg-[#fafbff]'
+                        }`}
                       >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(selectedObligation)}
-                        className="p-2 rounded-lg hover:bg-rose-50 text-rose-500"
-                        title="Xóa lịch nhắc"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {!selectedObligation ? (
-                  <div className="p-10 text-center text-slate-400">
-                    <Calendar className="w-10 h-10 mx-auto mb-3 text-slate-300" />
-                    <p className="text-xs">Chưa có kỳ trả nào để hiển thị.</p>
-                  </div>
-                ) : (
-                  <div className="p-5 space-y-3 max-h-[620px] overflow-y-auto">
-                    {selectedPayments.length === 0 ? (
-                      <p className="text-center text-xs text-slate-400 py-8">Chưa có dữ liệu kỳ trả.</p>
-                    ) : (
-                      selectedPayments.map((payment) => {
-                        const dueIn = daysUntil(payment.dueAt);
-                        const open = isOpenPayment(payment.status);
-                        return (
-                          <div key={payment.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="font-bold text-sm text-slate-900">{formatMoney(payment.amount)}</p>
-                                <p className="text-xs text-slate-500">Hạn trả: {formatDate(payment.dueAt)}</p>
-                                {open && (
-                                  <p className={`text-[11px] font-semibold mt-1 ${dueIn < 0 ? 'text-rose-600' : dueIn <= 7 ? 'text-amber-600' : 'text-slate-400'}`}>
-                                    {dueIn < 0 ? `Đã quá hạn ${Math.abs(dueIn)} ngày` : dueIn === 0 ? 'Đến hạn hôm nay' : `Còn ${dueIn} ngày`}
-                                  </p>
+                        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                          <div className="flex min-w-0 gap-4">
+                            <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-[11px] ${
+                              selected ? 'bg-[#7c5cff] text-white' : 'bg-emerald-50 text-emerald-600'
+                            }`}>
+                              <Wallet className="h-5 w-5" />
+                            </span>
+                            <div className="min-w-0">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <h3 className="truncate text-base font-black text-[#101828]">{obligation.title}</h3>
+                                {!obligation.isActive && (
+                                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500">
+                                    Tắt
+                                  </span>
                                 )}
                               </div>
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border ${statusClass(payment)}`}>
-                                {payment.status === 'PAID' ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                                {STATUS_LABELS[payment.status]}
+                              <p className="mt-1 truncate text-sm text-[#667085]">
+                                {getWalletName(obligation.walletId)} · {getTagName(obligation.tagId)}
+                              </p>
+                              <p className="mt-1 truncate text-xs text-[#667085]">
+                                Nhắc trước {obligation.reminderDaysBefore} ngày · {formatPaymentFrequency(obligation.frequency, obligation.intervalCount)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-[1fr_auto] items-end gap-6 md:min-w-[230px]">
+                            <div className="text-right">
+                              <strong className="block text-base font-black text-[#101828]">
+                                {formatMoney(obligation.totalAmount)}
+                              </strong>
+                              <span className="mt-1 block text-sm text-[#667085]">
+                                {obligation.cycleCount} kỳ × {formatMoney(obligation.amountPerCycle)}
                               </span>
                             </div>
-
-                            {payment.remindedAt && (
-                              <p className="text-[11px] text-slate-400">Đã nhắc: {formatDate(payment.remindedAt)}</p>
-                            )}
-                            {payment.paidAt && (
-                              <p className="text-[11px] text-emerald-600 font-medium">Đã trả: {formatDate(payment.paidAt)}</p>
-                            )}
-
-                            {open && (
-                              <div className="grid grid-cols-2 gap-2 pt-1">
-                                <button
-                                  onClick={() => handlePay(payment)}
-                                  className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold flex items-center justify-center gap-1.5"
-                                >
-                                  <CheckCircle2 className="w-4 h-4" />
-                                  <span>Đã trả</span>
-                                </button>
-                                <button
-                                  onClick={() => handleSkip(payment)}
-                                  className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5"
-                                >
-                                  <SkipForward className="w-4 h-4" />
-                                  <span>Bỏ qua</span>
-                                </button>
-                              </div>
-                            )}
+                            <div className="min-w-[82px] text-right">
+                              <strong className={`block text-sm font-black ${dueLabelClass(obligation.nextDueAt)}`}>
+                                {dueLabel(obligation.nextDueAt)}
+                              </strong>
+                              <span className="mt-1 block text-sm text-[#667085]">{formatDate(obligation.nextDueAt)}</span>
+                            </div>
                           </div>
-                        );
-                      })
-                    )}
+                        </div>
+                        {selected && (
+                          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-[9px] border border-[#e4e0ff] bg-white/80 px-3 py-2 text-xs font-bold text-[#475467] shadow-[0_4px_12px_rgba(91,77,245,0.06)]">
+                            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-emerald-700">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Đã trả: {formatMoney(progress.paidAmount)}
+                            </span>
+                            <span className="h-1 w-1 rounded-full bg-[#d0d5dd]" />
+                            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-orange-600">
+                              <Clock className="h-3.5 w-3.5" />
+                              Còn lại: {formatMoney(progress.remainingAmount)}
+                            </span>
+                            <span className="h-1 w-1 rounded-full bg-[#d0d5dd]" />
+                            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[#475467]">
+                              {progress.paidCycles}/{progress.totalCycles} kỳ đã trả
+                            </span>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="overflow-hidden rounded-[14px] border border-[#e7eaf0] bg-white shadow-[0_8px_20px_rgba(16,24,40,0.04)]">
+              <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] p-5 sm:p-6">
+                <div className="min-w-0">
+                  <h2 className="text-xl font-black leading-tight text-[#101828]">Kỳ trả</h2>
+                  <p className="mt-1 truncate text-sm text-[#667085]">
+                    {selectedObligation ? selectedObligation.title : 'Chọn một khoản nợ để xem lịch'}
+                  </p>
+                </div>
+                {selectedObligation && (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openEditForm(selectedObligation)}
+                      className="grid h-9 w-9 place-items-center rounded-[9px] text-[#475467] transition hover:bg-[#f2f4f7] hover:text-[#5b4df5]"
+                      title="Sửa lịch nhắc"
+                      aria-label="Sửa lịch nhắc"
+                    >
+                      <Pencil className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(selectedObligation)}
+                      className="grid h-9 w-9 place-items-center rounded-[9px] text-rose-500 transition hover:bg-rose-50"
+                      title="Xóa lịch nhắc"
+                      aria-label="Xóa lịch nhắc"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
                   </div>
                 )}
-              </section>
-            </div>
-          )}
-        </main>
-      </div>
+              </div>
+
+              {!selectedObligation ? (
+                <div className="grid min-h-[360px] place-items-center px-6 py-12 text-center">
+                  <div>
+                    <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#eef4ff] text-[#2970ff]">
+                      <Calendar className="h-7 w-7" />
+                    </span>
+                    <p className="mt-3 text-sm text-[#667085]">Chưa có kỳ trả nào để hiển thị.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="max-h-[660px] space-y-3 overflow-y-auto p-4 sm:p-5">
+                  {selectedProgress && (
+                    <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+                      <article className="flex min-h-[76px] items-center gap-3 rounded-[10px] border border-[#e7eaf0] bg-white p-3 shadow-[0_4px_12px_rgba(16,24,40,0.03)]">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-[#f4f2ff] text-[#5b4df5]">
+                          <Calendar className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-[#667085]">Kỳ còn lại</p>
+                          <strong className="mt-1 block text-lg font-black text-[#101828]">
+                            {selectedProgress.remainingCycles}
+                            <span className="ml-1 text-xs font-bold text-[#667085]">/ {selectedProgress.totalCycles} kỳ</span>
+                          </strong>
+                        </div>
+                      </article>
+
+                      <article className="flex min-h-[76px] items-center gap-3 rounded-[10px] border border-[#e7eaf0] bg-white p-3 shadow-[0_4px_12px_rgba(16,24,40,0.03)]">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-orange-50 text-orange-500">
+                          <FileText className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-[#667085]">Còn phải trả</p>
+                          <strong className="mt-1 block truncate text-sm font-black text-[#101828]">
+                            {formatMoney(selectedProgress.remainingAmount)}
+                          </strong>
+                        </div>
+                      </article>
+
+                      <article className="flex min-h-[76px] items-center gap-3 rounded-[10px] border border-[#e7eaf0] bg-white p-3 shadow-[0_4px_12px_rgba(16,24,40,0.03)]">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-emerald-50 text-emerald-600">
+                          <CheckCircle2 className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-[#667085]">Kỳ đã trả</p>
+                          <strong className="mt-1 block text-lg font-black text-[#101828]">
+                            {selectedProgress.paidCycles}
+                            <span className="ml-1 text-xs font-bold text-[#667085]">/ {selectedProgress.totalCycles} kỳ</span>
+                          </strong>
+                        </div>
+                      </article>
+
+                      <article className="flex min-h-[76px] items-center gap-3 rounded-[10px] border border-[#e7eaf0] bg-white p-3 shadow-[0_4px_12px_rgba(16,24,40,0.03)]">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-emerald-50 text-emerald-600">
+                          <Wallet className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-bold text-[#667085]">Đã trả</p>
+                          <strong className="mt-1 block truncate text-sm font-black text-[#101828]">
+                            {formatMoney(selectedProgress.paidAmount)}
+                          </strong>
+                        </div>
+                      </article>
+                    </div>
+                  )}
+
+                  {selectedPayments.length === 0 ? (
+                    <div className="grid min-h-[280px] place-items-center text-center">
+                      <p className="text-sm text-[#667085]">Chưa có dữ liệu kỳ trả.</p>
+                    </div>
+                  ) : (
+                    selectedPayments.map((payment) => {
+                      const open = isOpenPayment(payment.status);
+                      const paid = payment.status === 'PAID';
+                      const processing = processingPaymentIds.has(payment.id);
+                      return (
+                        <article
+                          key={payment.id}
+                          className="rounded-[14px] border border-[#e7eaf0] bg-white p-4 shadow-[0_5px_14px_rgba(16,24,40,0.035)]"
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <strong className="block text-lg font-black text-[#101828]">
+                                {formatMoney(payment.amount)}
+                              </strong>
+                              <p className="mt-1 text-sm text-[#475467]">Hạn trả: {formatDate(payment.dueAt)}</p>
+                              {open && (
+                                <p className={`mt-2 text-sm font-bold ${dueLabelClass(payment.dueAt)}`}>
+                                  {paymentDueHint(payment.dueAt)}
+                                </p>
+                              )}
+                              {payment.remindedAt && (
+                                <p className="mt-2 text-xs text-[#667085]">Đã nhắc: {formatDate(payment.remindedAt)}</p>
+                              )}
+                              {payment.paidAt && (
+                                <p className="mt-2 text-xs font-bold text-emerald-600">Đã trả: {formatDate(payment.paidAt)}</p>
+                              )}
+                            </div>
+                            <span className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-black ${statusClass(payment)}`}>
+                              {paid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
+                              {STATUS_LABELS[payment.status]}
+                            </span>
+                          </div>
+
+                          {paid ? (
+                            <div className="mt-4 flex min-h-11 items-center justify-center gap-2 rounded-[9px] border border-emerald-200 bg-emerald-50 text-sm font-black text-emerald-700">
+                              <CheckCircle2 className="h-5 w-5" />
+                              <span>Đã đánh dấu đã trả</span>
+                            </div>
+                          ) : open ? (
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                              <button
+                                type="button"
+                                onClick={() => handlePay(payment)}
+                                disabled={processing}
+                                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[9px] bg-[#5b4df5] px-4 text-sm font-black text-white shadow-[0_7px_16px_rgba(91,77,245,0.2)] transition hover:bg-[#4f46e5] disabled:cursor-wait disabled:opacity-60"
+                              >
+                                {processing ? (
+                                  <Loader2 className="h-5 w-5 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="h-5 w-5" />
+                                )}
+                                <span>{processing ? 'Đang xử lý...' : 'Đánh dấu đã trả'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSkip(payment)}
+                                disabled={processing}
+                                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[9px] border border-[#d0d5dd] bg-white px-4 text-sm font-bold text-[#475467] transition hover:bg-[#f8fafc] disabled:cursor-wait disabled:opacity-60"
+                              >
+                                {processing ? (
+                                  <Loader2 className="h-5 w-5 animate-spin" />
+                                ) : (
+                                  <SkipForward className="h-5 w-5" />
+                                )}
+                                <span>{processing ? 'Đang xử lý...' : 'Bỏ qua kỳ này'}</span>
+                              </button>
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </main>
 
       {showForm && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-[720px] overflow-y-auto rounded-[14px] bg-white shadow-[0_24px_80px_rgba(16,24,40,0.28)]">
+            <div className="flex items-center justify-between border-b border-[#edf0f5] p-5 sm:p-6">
               <div>
-                <h3 className="font-bold text-lg text-slate-900">
+                <h3 className="text-lg font-black text-[#101828]">
                   {editingObligation ? 'Sửa lịch nhắc nợ' : 'Thêm lịch nhắc nợ'}
                 </h3>
-                <p className="text-xs text-slate-400">Thiết lập số tiền, chu kỳ và thời điểm FlowFi cần nhắc bạn.</p>
+                <p className="mt-1 text-sm text-[#667085]">Thiết lập số tiền, chu kỳ và thời điểm FlowFi cần nhắc bạn.</p>
               </div>
-              <button onClick={closeForm} className="p-2 rounded-lg hover:bg-slate-100 text-slate-400">
+              <button
+                type="button"
+                onClick={closeForm}
+                className="grid h-9 w-9 place-items-center rounded-[9px] text-[#667085] transition hover:bg-[#f2f4f7]"
+                aria-label="Đóng form"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-1.5 md:col-span-2">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tên khoản nợ</label>
+            <form onSubmit={handleSubmit} className="space-y-5 p-5 sm:p-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2 md:col-span-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Tên khoản nợ</label>
                   <input
                     type="text"
                     value={form.title}
                     onChange={(event) => setForm({ ...form, title: event.target.value })}
                     placeholder="Ví dụ: Trả góp laptop, khoản vay gia đình..."
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                    className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
                     required
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ví thanh toán</label>
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Ví thanh toán</label>
                   <select
                     value={form.walletId}
                     onChange={(event) => setForm({ ...form, walletId: event.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                    className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
                     required
                   >
                     <option value="">Chọn ví</option>
@@ -667,12 +855,12 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
                   </select>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Danh mục</label>
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Danh mục</label>
                   <select
                     value={form.tagId}
                     onChange={(event) => setForm({ ...form, tagId: event.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                    className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
                   >
                     <option value="">Không gắn tag</option>
                     {tags.map((tag) => (
@@ -681,67 +869,85 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
                   </select>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tổng số tiền</label>
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Số tiền mỗi kỳ</label>
                   <input
                     type="number"
                     min="1"
-                    value={form.totalAmount}
-                    onChange={(event) => setForm({ ...form, totalAmount: event.target.value })}
+                    value={form.amountPerCycle}
+                    onChange={(event) => setForm({ ...form, amountPerCycle: event.target.value })}
                     placeholder="5000000"
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                    className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
                     required
                   />
+                  <p className="inline-flex rounded-full bg-[#f4f2ff] px-3 py-1 text-xs font-bold text-[#5b4df5]">
+                    Tổng dự kiến: {formatMoney(estimatedTotalAmount)}
+                  </p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Số kỳ trả</label>
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Số kỳ trả</label>
                   <input
                     type="number"
                     min="1"
                     max="240"
                     value={form.cycleCount}
-                    onChange={(event) => setForm({
-                      ...form,
-                      cycleCount: event.target.value,
-                      frequency: Number(event.target.value) > 1 && form.frequency === 'ONCE' ? 'MONTHLY' : form.frequency,
-                    })}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                    onChange={(event) => setForm({ ...form, cycleCount: event.target.value })}
+                    className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
                     required
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tần suất</label>
-                  <select
-                    value={form.frequency}
-                    onChange={(event) => setForm({ ...form, frequency: event.target.value as PaymentObligationFrequency })}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
-                  >
-                    <option value="ONCE">Một lần</option>
-                    <option value="WEEKLY">Hàng tuần</option>
-                    <option value="MONTHLY">Hàng tháng</option>
-                    <option value="YEARLY">Hàng năm</option>
-                  </select>
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Chu kỳ trả</label>
+                  <div className="grid grid-cols-[0.95fr_1.05fr] gap-3">
+                    <label className="space-y-1">
+                      <span className="block text-xs font-bold text-[#667085]">Mỗi</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="365"
+                        value={form.intervalCount}
+                        onChange={(event) => setForm({ ...form, intervalCount: event.target.value })}
+                        className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
+                        required
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="block text-xs font-bold text-[#667085]">Đơn vị</span>
+                      <select
+                        value={form.frequencyUnit}
+                        onChange={(event) => setForm({ ...form, frequencyUnit: event.target.value as PaymentFrequencyUnit })}
+                        className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
+                      >
+                        {Object.entries(FREQUENCY_UNIT_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <p className="text-xs font-medium text-[#667085]">
+                    Ví dụ: 10 ngày / kỳ, 2 tháng / kỳ, 1 năm / kỳ
+                  </p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ngày đến hạn đầu tiên</label>
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Ngày đến hạn đầu tiên</label>
                   <input
                     type="date"
                     value={form.firstDueAt}
                     onChange={(event) => setForm({ ...form, firstDueAt: event.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                    className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
                     required
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nhắc trước</label>
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Nhắc trước</label>
                   <select
                     value={form.reminderDaysBefore}
                     onChange={(event) => setForm({ ...form, reminderDaysBefore: event.target.value })}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600"
+                    className="h-11 w-full rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
                   >
                     {[0, 1, 2, 3, 5, 7, 14, 30].map((day) => (
                       <option key={day} value={day}>{day === 0 ? 'Đúng ngày đến hạn' : `${day} ngày trước hạn`}</option>
@@ -749,40 +955,40 @@ export const DebtReminderScreen: React.FC<DebtReminderScreenProps> = ({ onNaviga
                   </select>
                 </div>
 
-                <div className="space-y-1.5 md:col-span-2">
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ghi chú</label>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="block text-[11px] font-black uppercase tracking-wide text-[#98a2b3]">Ghi chú</label>
                   <textarea
                     value={form.note}
                     onChange={(event) => setForm({ ...form, note: event.target.value })}
                     placeholder="Thêm thông tin người nhận, điều kiện trả nợ hoặc ghi chú cá nhân..."
                     rows={3}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-600 resize-none"
+                    className="w-full resize-none rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] px-4 py-3 text-sm text-[#344054] outline-none transition focus:border-[#6f63ff] focus:bg-white focus:ring-3 focus:ring-[#ebe9ff]"
                   />
                 </div>
 
-                <label className="md:col-span-2 flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer">
+                <label className="flex cursor-pointer items-center gap-3 rounded-[9px] border border-[#d0d5dd] bg-[#f8fafc] p-3 md:col-span-2">
                   <input
                     type="checkbox"
                     checked={form.isActive}
                     onChange={(event) => setForm({ ...form, isActive: event.target.checked })}
-                    className="w-4 h-4 accent-blue-600"
+                    className="h-4 w-4 accent-[#5b4df5]"
                   />
-                  <span className="text-sm font-medium text-slate-700">Bật nhắc nợ cho lịch này</span>
+                  <span className="text-sm font-bold text-[#344054]">Bật nhắc nợ cho lịch này</span>
                 </label>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              <div className="flex flex-col-reverse gap-3 pt-1 sm:flex-row sm:items-center sm:justify-end">
                 <button
                   type="button"
                   onClick={closeForm}
-                  className="px-4 py-2.5 rounded-xl text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  className="min-h-11 rounded-[9px] border border-[#d0d5dd] bg-white px-5 text-sm font-bold text-[#475467] transition hover:bg-[#f8fafc]"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[9px] bg-[#5b4df5] px-5 text-sm font-black text-white shadow-[0_7px_16px_rgba(91,77,245,0.2)] transition hover:bg-[#4f46e5] disabled:cursor-wait disabled:opacity-60"
                 >
                   {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
                   <span>{editingObligation ? 'Lưu thay đổi' : 'Tạo lịch nhắc'}</span>

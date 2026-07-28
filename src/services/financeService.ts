@@ -22,6 +22,20 @@ import type {
   PayPaymentObligationPaymentRequest,
 } from '../types/api';
 
+const unwrap = <T>(payload: unknown): T => {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return (payload as { data: T }).data;
+  }
+  return payload as T;
+};
+
+const emptyTransactions = (query?: TransactionQuery): PagedTransactionsResponse => ({
+  items: [],
+  page: query?.page ?? 1,
+  pageSize: query?.pageSize ?? 20,
+  total: 0,
+});
+
 // ============ WALLETS ============
 // BE returns IReadOnlyList<WalletDto> directly (no wrapper)
 export const walletService = {
@@ -55,7 +69,15 @@ export const walletService = {
 export const transactionService = {
   getAll: async (query?: TransactionQuery): Promise<PagedTransactionsResponse> => {
     const response = await apiClient.get<PagedTransactionsResponse>('/api/finance/transactions', { params: query });
-    return response.data;
+    const payload = unwrap<Partial<PagedTransactionsResponse> | TransactionDto[]>(response.data);
+    if (Array.isArray(payload)) {
+      return { ...emptyTransactions(query), items: payload, total: payload.length };
+    }
+    return {
+      ...emptyTransactions(query),
+      ...payload,
+      items: Array.isArray(payload.items) ? payload.items : [],
+    };
   },
 
   getById: async (id: string): Promise<TransactionDto | null> => {
@@ -149,29 +171,32 @@ export const recurringService = {
 };
 
 // ============ PAYMENT OBLIGATIONS ============
+const PAYMENT_OBLIGATIONS_BASE = '/api/finance/payment-obligations';
+const PAYMENT_OBLIGATION_PAYMENTS_BASE = '/api/finance/payment-obligation-payments';
+
 export const paymentObligationService = {
   getAll: async (): Promise<PaymentObligationDto[]> => {
-    const response = await apiClient.get<PaymentObligationDto[]>('/api/payment-obligations');
+    const response = await apiClient.get<PaymentObligationDto[]>(PAYMENT_OBLIGATIONS_BASE);
     return response.data;
   },
 
   getById: async (id: string): Promise<PaymentObligationDto | null> => {
-    const response = await apiClient.get<PaymentObligationDto>(`/api/payment-obligations/${id}`);
+    const response = await apiClient.get<PaymentObligationDto>(`${PAYMENT_OBLIGATIONS_BASE}/${id}`);
     return response.data;
   },
 
   create: async (data: CreatePaymentObligationDto): Promise<PaymentObligationDto> => {
-    const response = await apiClient.post<PaymentObligationDto>('/api/payment-obligations', data);
+    const response = await apiClient.post<PaymentObligationDto>(PAYMENT_OBLIGATIONS_BASE, data);
     return response.data;
   },
 
   update: async (id: string, data: UpdatePaymentObligationDto): Promise<PaymentObligationDto> => {
-    const response = await apiClient.put<PaymentObligationDto>(`/api/payment-obligations/${id}`, data);
+    const response = await apiClient.put<PaymentObligationDto>(`${PAYMENT_OBLIGATIONS_BASE}/${id}`, data);
     return response.data;
   },
 
   delete: async (id: string): Promise<void> => {
-    await apiClient.delete(`/api/payment-obligations/${id}`);
+    await apiClient.delete(`${PAYMENT_OBLIGATIONS_BASE}/${id}`);
   },
 
   getPayments: async (
@@ -179,7 +204,7 @@ export const paymentObligationService = {
     params?: { status?: string; from?: string; to?: string }
   ): Promise<PaymentObligationPaymentDto[]> => {
     const response = await apiClient.get<PaymentObligationPaymentDto[]>(
-      `/api/payment-obligations/${obligationId}/payments`,
+      `${PAYMENT_OBLIGATIONS_BASE}/${obligationId}/payments`,
       { params }
     );
     return response.data;
@@ -190,7 +215,7 @@ export const paymentObligationService = {
     data: PayPaymentObligationPaymentRequest = {}
   ): Promise<PaymentObligationPaymentDto> => {
     const response = await apiClient.post<PaymentObligationPaymentDto>(
-      `/api/payment-obligation-payments/${paymentId}/pay`,
+      `${PAYMENT_OBLIGATION_PAYMENTS_BASE}/${paymentId}/pay`,
       data
     );
     return response.data;
@@ -198,7 +223,7 @@ export const paymentObligationService = {
 
   skipPayment: async (paymentId: string): Promise<PaymentObligationPaymentDto> => {
     const response = await apiClient.post<PaymentObligationPaymentDto>(
-      `/api/payment-obligation-payments/${paymentId}/skip`
+      `${PAYMENT_OBLIGATION_PAYMENTS_BASE}/${paymentId}/skip`
     );
     return response.data;
   },

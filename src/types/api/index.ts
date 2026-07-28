@@ -325,11 +325,11 @@ export interface FinancialSummaryDto {
 export interface NotificationDto {
   id: string;
   userId: string;
-  type: 'BUDGET_WARNING' | 'TRANSACTION' | 'SYSTEM' | 'SAVINGS_TIP' | 'REMINDER';
   title: string;
-  message: string;
+  content?: string;
+  notificationType: 'BudgetWarning' | 'GoalReminder' | 'Transaction' | 'System' | 'SavingsTip' | 'PaymentReminder' | 'DailyReminder';
+  metadata?: Record<string, unknown>;
   isRead: boolean;
-  data?: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -337,11 +337,12 @@ export interface PagedNotificationsResponse {
   items: NotificationDto[];
   page: number;
   pageSize: number;
-  total: number;
+  totalItems: number;
+  totalPages: number;
 }
 
 export interface UnreadCountResponse {
-  count: number;
+  unreadCount: number;
 }
 
 export interface UpdateNotificationPreferenceRequest {
@@ -554,7 +555,7 @@ export interface UpdateRecurringTransactionDto extends Partial<CreateRecurringTr
 }
 
 // Payment Obligation DTOs
-export type PaymentObligationFrequency = 'ONCE' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+export type PaymentObligationFrequency = 'ONCE' | 'WEEKLY' | 'DAILY' | 'MONTHLY' | 'YEARLY';
 export type PaymentObligationPaymentStatus = 'PENDING' | 'REMINDED' | 'PAID' | 'OVERDUE' | 'SKIPPED';
 
 export interface PaymentObligationDto {
@@ -568,6 +569,7 @@ export interface PaymentObligationDto {
   title: string;
   note?: string;
   frequency: PaymentObligationFrequency;
+  intervalCount: number;
   firstDueAt: string;
   finalDueAt: string;
   nextDueAt: string;
@@ -585,6 +587,7 @@ export interface CreatePaymentObligationDto {
   title: string;
   note?: string;
   frequency: PaymentObligationFrequency;
+  intervalCount: number;
   firstDueAt: string;
   reminderDaysBefore: number;
   isActive: boolean;

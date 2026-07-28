@@ -18,6 +18,26 @@ const unwrap = <T>(payload: unknown): T => {
   return payload as T;
 };
 
+const asNumber = (value: unknown): number => Number(value ?? 0) || 0;
+
+const normalizeCashflow = (payload: unknown): CashflowResponse => {
+  const value = unwrap<Partial<CashflowResponse> | undefined>(payload);
+  const dailyData = Array.isArray(value?.dailyData)
+    ? value.dailyData.map(item => ({
+      date: item.date,
+      income: asNumber(item.income),
+      expense: asNumber(item.expense),
+    }))
+    : [];
+
+  return {
+    dailyData,
+    totalIncome: asNumber(value?.totalIncome),
+    totalExpense: asNumber(value?.totalExpense),
+    netCashflow: asNumber(value?.netCashflow),
+  };
+};
+
 const isNotFound = (error: unknown) =>
   typeof error === 'object' && error !== null && 'response' in error &&
   (error as { response?: { status?: number } }).response?.status === 404;
@@ -201,13 +221,13 @@ export const analyticsService = {
     const response = await apiClient.get<CashflowResponse>('/api/analytics/cashflow/daily', {
       params: { days }
     });
-    return unwrap<CashflowResponse>(response.data);
+    return normalizeCashflow(response.data);
   },
 
   // GET /api/analytics/ratios - Returns RatiosResponse directly
   getRatios: async (): Promise<RatiosResponse> => {
     const response = await apiClient.get<RatiosResponse>('/api/analytics/ratios');
-    return response.data;
+    return unwrap<RatiosResponse>(response.data);
   },
 };
 

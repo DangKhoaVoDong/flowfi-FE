@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Bell,
-  Bot,
+  CalendarClock,
   ChevronRight,
   CreditCard,
   LayoutDashboard,
@@ -36,6 +36,7 @@ const navigation = [
   { id: 'transactions' as ScreenId, label: 'Giao dịch', icon: CreditCard },
   { id: 'wallets' as ScreenId, label: 'Ví', icon: WalletCards },
   { id: 'budget' as ScreenId, label: 'Ngân sách', icon: PieChart },
+  { id: 'debt-reminders' as ScreenId, label: 'Nhắc nợ', icon: CalendarClock },
   { id: 'goals' as ScreenId, label: 'Mục tiêu', icon: Target },
   { id: 'reports' as ScreenId, label: 'Báo cáo', icon: BarChart3 },
 ];
@@ -127,11 +128,9 @@ export function ApplicationShell({
       </div>
 
       <nav className="flowfi-navigation" aria-label="Điều hướng chính">
-        {navigation.map((item, index) => {
+        {navigation.map((item) => {
           const Icon = item.icon;
-          const isActive =
-            currentScreen === item.id &&
-            (item.label !== 'Ví' || index === 1);
+          const isActive = currentScreen === item.id;
           return (
             <button
               key={`${item.label}-${item.id}`}
