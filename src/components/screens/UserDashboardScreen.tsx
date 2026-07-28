@@ -51,11 +51,10 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [walletsRes, transactionsRes, summaryRes, budgetsRes, cashflowRes, ratiosRes, tagsRes] = await Promise.allSettled([
+      const [walletsRes, transactionsRes, summaryRes, cashflowRes, ratiosRes, tagsRes] = await Promise.allSettled([
         walletService.getAll(),
         transactionService.getAll({ pageSize: 10 }),
         summaryService.getCurrentMonth(),
-        budgetService.getAllProgress(),
         analyticsService.getDailyCashflow(cashflowDays),
         analyticsService.getRatios(),
         tagService.getAll(),
@@ -79,9 +78,13 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
         // BE returns FinancialSummaryResponse directly
         setSummary(summaryRes.value || null);
       }
-      if (budgetsRes.status === 'fulfilled') {
-        // BE returns BudgetProgressResponse[] array directly
-        setBudgetProgress(Array.isArray(budgetsRes.value) ? budgetsRes.value : []);
+      // Fetch budget progress separately with explicit error handling
+      try {
+        const budgetData = await budgetService.getAllProgress();
+        setBudgetProgress(Array.isArray(budgetData) ? budgetData : []);
+      } catch (budgetError) {
+        console.warn('Budget progress API error (non-blocking):', budgetError);
+        setBudgetProgress([]); // Set empty array on error
       }
       if (cashflowRes.status === 'fulfilled') {
         // BE returns CashflowResponse directly: { dailyData, totalIncome, totalExpense, netCashflow }
@@ -509,31 +512,48 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                     const percentage = bp.percentUsed;
 
                     return (
-                      <div key={bp.budgetId} className="space-y-1.5">
-                        <div className="flex justify-between text-xs font-semibold">
-                          <span className="text-slate-800">{bp.budgetName}</span>
-                          <span className={isOver ? 'text-rose-600 font-bold' : 'text-slate-500'}>{percentage.toFixed(0)}%</span>
+                      <div key={bp.budgetId} className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-semibold text-slate-800">{bp.budgetName}</span>
+                          <span className={`text-sm font-bold ${isOver ? 'text-rose-600' : 'text-slate-600'}`}>
+                            {percentage.toFixed(0)}%
+                          </span>
                         </div>
-                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                        <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                           <div
-                            className={`h-full ${isOver ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                            className={`h-full rounded-full transition-all ${
+                              isOver
+                                ? 'bg-rose-500'
+                                : percentage >= 80
+                                ? 'bg-amber-400'
+                                : 'bg-emerald-500'
+                            }`}
                             style={{ width: `${Math.min(percentage, 100)}%` }}
                           />
                         </div>
-                        <p className={`text-[11px] flex items-center gap-1 font-medium ${isOver ? 'text-rose-500' : 'text-slate-400'}`}>
-                          {isOver ? (
-                            <>
-                              <AlertCircle className="w-3 h-3" />
-                              Vượt: {bp.remainingAmount.toLocaleString('vi-VN')} đ
-                            </>
-                          ) : (
-                            `Còn lại: ${bp.remainingAmount.toLocaleString('vi-VN')} đ`
-                          )}
-                        </p>
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-slate-500">
+                            Đã dùng {bp.spentAmount.toLocaleString('vi-VN')} đ / {bp.totalTargetAmount.toLocaleString('vi-VN')} đ
+                          </span>
+                          <span className={`text-xs font-semibold flex items-center gap-1 ${isOver ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {isOver ? (
+                              <>
+                                <AlertCircle className="w-3 h-3" />
+                                Vượt {Math.abs(bp.remainingAmount).toLocaleString('vi-VN')} đ
+                              </>
+                            ) : (
+                              <>Còn lại {bp.remainingAmount.toLocaleString('vi-VN')} đ</>
+                            )}
+                          </span>
+                        </div>
                       </div>
                     );
                   }) : (
-                    <p className="text-xs text-slate-400 text-center py-4">Chưa có ngân sách nào</p>
+                    <div className="text-center py-8">
+                      <PiggyBank className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                      <p className="text-sm text-slate-400">Chưa có ngân sách nào</p>
+                      <p className="text-xs text-slate-400 mt-1">Tạo ngân sách để theo dõi chi tiêu</p>
+                    </div>
                   )}
                 </div>
               </div>

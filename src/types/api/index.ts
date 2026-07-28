@@ -257,7 +257,9 @@ export interface UpdateBudgetRequest extends Partial<CreateBudgetRequest> {
 export interface BudgetProgressDto {
   budgetId: string;
   budgetName: string;
-  budgetAmount: number;
+  month: number;
+  year: number;
+  totalTargetAmount: number;
   spentAmount: number;
   remainingAmount: number;
   percentUsed: number;
