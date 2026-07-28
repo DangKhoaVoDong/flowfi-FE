@@ -32,11 +32,8 @@ export const tokenService = {
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = tokenService.getAccessToken();
-    console.log('[API Request]', config.method?.toUpperCase(), config.url);
-    console.log('[API Request] Token:', token ? `Bearer ${token.substring(0, 30)}...` : 'NULL');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
-      console.log('[API Request] Header set:', config.headers.Authorization.substring(0, 50) + '...');
     }
     return config;
   },
@@ -66,17 +63,12 @@ const processQueue = (error: AxiosError | null, token: string | null = null) => 
 
 apiClient.interceptors.response.use(
   (response) => {
-    console.log('[API Response OK]', response.config.method?.toUpperCase(), response.config.url, response.status);
     return response;
   },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    console.log('[API Response ERROR]', error.config?.method?.toUpperCase(), error.config?.url, error.response?.status);
-    console.log('[API Response ERROR] Message:', error.message);
-
     if (error.response?.status === 401 && !originalRequest._retry) {
-      console.log('[Auth] Got 401, attempting refresh...');
       
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
@@ -96,22 +88,13 @@ apiClient.interceptors.response.use(
 
       try {
         const refreshToken = tokenService.getRefreshToken();
-        console.log('[Auth] Refresh token:', refreshToken ? 'EXISTS' : 'NULL');
-        console.log('[Auth] Refresh token value:', refreshToken?.substring(0, 30) + '...');
-        
         if (!refreshToken) {
           throw new Error('No refresh token available');
         }
 
-        const refreshRequestBody = { refreshToken };
-        console.log('[Auth] Refresh request body:', JSON.stringify(refreshRequestBody));
-        
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, refreshRequestBody, {
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, { refreshToken }, {
           headers: { 'Content-Type': 'application/json' }
         });
-
-        console.log('[Auth] Refresh response status:', response.status);
-        console.log('[Auth] Refresh response data:', response.data);
 
         const { accessToken, refreshToken: newRefreshToken } = response.data.data;
         tokenService.setAccessToken(accessToken);
@@ -123,7 +106,6 @@ apiClient.interceptors.response.use(
         }
         return apiClient(originalRequest);
       } catch (refreshError) {
-        console.log('[Auth] Refresh failed:', refreshError);
         processQueue(refreshError as AxiosError, null);
         tokenService.clearTokens();
         window.dispatchEvent(new CustomEvent(AUTH_LOGOUT_EVENT));

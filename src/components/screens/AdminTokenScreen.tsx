@@ -1,279 +1,37 @@
-import React, { useState } from 'react';
-import { ScreenId, TokenSession } from '../../types';
-import { 
-  Shield, Users, Key, FileText, Activity, AlertOctagon, 
-  Search, Filter, Lock, RefreshCw, XCircle, ChevronLeft, ChevronRight, CheckCircle2 
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, Save, Send, XCircle } from 'lucide-react';
+import type { ScreenId } from '../../types';
+import type { AdminAiConfig, AiUsagePage, AiUsageSummary, UpdateAdminAiConfig } from '../../types/api';
+import { adminAiService, getAdminError } from '../../services/adminService';
+import { AdminLayout } from '../admin/AdminLayout';
 
-interface AdminTokenScreenProps {
-  onNavigate: (screen: ScreenId) => void;
+type Tab = 'config' | 'overview' | 'history';
+const toIso = (value: string, end = false) => value ? new Date(`${value}T${end ? '23:59:59.999' : '00:00:00.000'}Z`).toISOString() : undefined;
+const date = (value: string) => new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
+const blankUsage: AiUsagePage = { items: [], page: 1, pageSize: 20, total: 0 };
+
+export function AdminTokenScreen({ onNavigate }: { onNavigate: (screen: ScreenId) => void }) {
+  const [tab, setTab] = useState<Tab>('config'); const [config, setConfig] = useState<AdminAiConfig | null>(null); const [newKey, setNewKey] = useState('');
+  const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [summary, setSummary] = useState<AiUsageSummary | null>(null); const [usage, setUsage] = useState<AiUsagePage>(blankUsage);
+  const [provider, setProvider] = useState(''); const [model, setModel] = useState(''); const [operation, setOperation] = useState(''); const [status, setStatus] = useState(''); const [loading, setLoading] = useState(false); const [saving, setSaving] = useState(false); const [testing, setTesting] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const fail = (cause: unknown) => { const apiError = getAdminError(cause); setError(`${apiError.message}${apiError.traceId ? ` (trace: ${apiError.traceId})` : ''}`); if (apiError.status === 403) onNavigate('forbidden'); };
+  const loadConfig = async () => { setLoading(true); setError(''); try { setConfig(await adminAiService.getConfig()); } catch (cause) { fail(cause); } finally { setLoading(false); } };
+  const loadSummary = async () => { setLoading(true); setError(''); try { setSummary(await adminAiService.getSummary(toIso(from), toIso(to, true))); } catch (cause) { fail(cause); } finally { setLoading(false); } };
+  const loadUsage = async (page = usage.page) => { setLoading(true); setError(''); try { setUsage(await adminAiService.listUsage({ page, pageSize: 20, from: toIso(from), to: toIso(to, true), provider: provider || undefined, model: model || undefined, operation: operation || undefined, status: status || undefined })); } catch (cause) { fail(cause); } finally { setLoading(false); } };
+  useEffect(() => { if (tab === 'config' && !config) void loadConfig(); if (tab === 'overview') void loadSummary(); if (tab === 'history') void loadUsage(1); }, [tab]);
+  const save = async () => { if (!config) return; if (!config.provider.trim() || !config.model.trim()) return setError('Provider và model là bắt buộc.'); try { new URL(config.baseUrl); } catch { return setError('Base URL phải là URL tuyệt đối hợp lệ.'); } if (config.timeoutSeconds < 5 || config.timeoutSeconds > 300) return setError('Timeout phải từ 5 đến 300 giây.'); setSaving(true); setError(''); try { const input: UpdateAdminAiConfig = { provider: config.provider.trim(), baseUrl: config.baseUrl.trim(), responsesPath: config.responsesPath.trim(), model: config.model.trim(), timeoutSeconds: config.timeoutSeconds, apiKey: newKey.trim() || null }; setConfig(await adminAiService.updateConfig(input)); setNewKey(''); setNotice('Đã lưu cấu hình AI.'); } catch (cause) { fail(cause); } finally { setSaving(false); } };
+  const test = async () => { setTesting(true); setError(''); setNotice(''); try { const result = await adminAiService.testConfig(); setNotice(result.success ? `Kết nối thành công (${result.statusCode}).` : `Provider phản hồi mã ${result.statusCode}.`); } catch (cause) { fail(cause); } finally { setTesting(false); } };
+  const retry = () => { if (tab === 'config') void loadConfig(); else if (tab === 'overview') void loadSummary(); else void loadUsage(); };
+  const metrics = summary ? [['Tổng request', summary.totalRequests], ['Thành công', summary.successfulRequests], ['Thất bại', summary.failedRequests], ['Input tokens', summary.inputTokens], ['Output tokens', summary.outputTokens], ['Tổng tokens', summary.totalTokens], ['Độ trễ TB', `${summary.averageLatencyMs} ms`]] : [];
+  return <AdminLayout active="ai" onNavigate={onNavigate}><header className="flex min-h-16 items-center justify-between border-b border-slate-800 bg-[#121824]/70 px-6"><div><h1 className="font-bold">Quản trị AI</h1><p className="text-xs text-slate-400">Cấu hình provider và giám sát mức sử dụng.</p></div><button onClick={retry} className="rounded-lg border border-slate-700 p-2 text-slate-300" aria-label="Tải lại"><RefreshCw className="h-4 w-4" /></button></header>
+    <section className="mx-auto max-w-7xl space-y-5 p-6"><nav className="flex w-fit rounded-xl border border-slate-800 bg-[#151b26] p-1">{([['config', 'Cấu hình'], ['overview', 'Tổng quan'], ['history', 'Lịch sử']] as const).map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-lg px-4 py-2 text-sm ${tab === id ? 'bg-blue-600 font-semibold text-white' : 'text-slate-400 hover:text-white'}`}>{label}</button>)}</nav>
+      {notice && <p className="flex items-center gap-2 rounded-xl border border-emerald-800 bg-emerald-950/60 p-3 text-sm text-emerald-200"><CheckCircle2 className="h-4 w-4" />{notice}</p>}{error && <p className="flex items-center gap-2 rounded-xl border border-rose-800 bg-rose-950/60 p-3 text-sm text-rose-200"><XCircle className="h-4 w-4" />{error}</p>}
+      {tab === 'config' && <ConfigForm config={config} newKey={newKey} loading={loading} saving={saving} testing={testing} onChange={setConfig} onKeyChange={setNewKey} onSave={save} onTest={test} />}
+      {tab === 'overview' && <><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} onApply={loadSummary} /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{loading ? <p className="text-slate-400">Đang tải thống kê…</p> : metrics.map(([label, value]) => <div key={String(label)} className="rounded-2xl border border-slate-800 bg-[#151b26] p-5"><p className="text-xs text-slate-400">{label}</p><p className="mt-2 text-2xl font-bold">{Number(value).toLocaleString('vi-VN')}</p></div>)}</div>{summary && <div className="rounded-2xl border border-slate-800 bg-[#151b26] p-5 text-sm text-slate-300">Tỷ lệ thành công: {summary.totalRequests ? ((summary.successfulRequests / summary.totalRequests) * 100).toFixed(1) : '0.0'}%. Chi phí không được hiển thị vì API chưa cung cấp dữ liệu pricing.</div>}</>}
+      {tab === 'history' && <><div className="space-y-3 rounded-2xl border border-slate-800 bg-[#151b26] p-4"><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} onApply={() => void loadUsage(1)} /><div className="grid gap-3 md:grid-cols-4"><input value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="Provider" className="input" /><input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Model" className="input" /><select value={operation} onChange={(e) => setOperation(e.target.value)} className="input"><option value="">Mọi operation</option><option>ImageOcr</option><option>VoiceTranscription</option><option>VoiceAnalysis</option></select><select value={status} onChange={(e) => setStatus(e.target.value)} className="input"><option value="">Mọi trạng thái</option><option>Succeeded</option><option>Failed</option></select></div></div><UsageTable usage={usage} loading={loading} onPage={(next) => void loadUsage(next)} /></>}
+    </section></AdminLayout>;
 }
 
-export const AdminTokenScreen: React.FC<AdminTokenScreenProps> = ({ onNavigate }) => {
-  const [search, setSearch] = useState('');
-  const [sessions, setSessions] = useState<TokenSession[]>([
-    {
-      tokenId: 'tk_...7f82',
-      accountId: 'acc_9821_fyl',
-      lastUsed: '2 phút trước',
-      usageCount: 4102,
-      status: 'ĐANG HOẠT ĐỘNG',
-      metadata: '192.168.***.*** (Chrome/Mac)',
-      canRevoke: true,
-    },
-    {
-      tokenId: 'tk_...a31d',
-      accountId: 'acc_4402_adm',
-      lastUsed: '14 phút trước',
-      usageCount: 128,
-      status: 'ĐÃ THU HỒI',
-      metadata: '45.22.***.*** (Firefox/Win)',
-      canRevoke: false,
-    },
-    {
-      tokenId: 'tk_...9c18',
-      accountId: 'acc_0019_sup',
-      lastUsed: '1 giờ trước',
-      usageCount: 892,
-      status: 'ĐÃ HẾT HẠN',
-      metadata: '82.11.***.*** (Safari/iOS)',
-      canRevoke: false,
-    },
-    {
-      tokenId: 'tk_...00e4',
-      accountId: 'acc_7152_ext',
-      lastUsed: 'Vừa xong',
-      usageCount: 56,
-      status: 'ĐANG HOẠT ĐỘNG',
-      metadata: '182.***.***.*** (Python-Req)',
-      canRevoke: true,
-    },
-    {
-      tokenId: 'tk_...f2d3',
-      accountId: 'acc_3391_fyl',
-      lastUsed: '8 phút trước',
-      usageCount: 2441,
-      status: 'ĐANG HOẠT ĐỘNG',
-      metadata: '192.168.***.*** (Chrome/Linux)',
-      canRevoke: true,
-    },
-  ]);
-
-  const handleRevoke = (id: string) => {
-    setSessions(sessions.map(s => s.tokenId === id ? { ...s, status: 'ĐÃ THU HỒI', canRevoke: false } : s));
-  };
-
-  const handleRevokeAll = () => {
-    if (confirm('Bạn có chắc chắn muốn thu hồi tất cả các phiên làm việc đang hoạt động?')) {
-      setSessions(sessions.map(s => ({ ...s, status: 'ĐÃ THU HỒI', canRevoke: false })));
-    }
-  };
-
-  const filtered = sessions.filter(s => 
-    s.accountId.toLowerCase().includes(search.toLowerCase()) ||
-    s.tokenId.toLowerCase().includes(search.toLowerCase()) ||
-    s.metadata.toLowerCase().includes(search.toLowerCase())
-  );
-
-  return (
-    <div className="min-h-screen bg-[#0B0E14] text-slate-100 font-sans flex">
-      {/* Dark Admin Sidebar */}
-      <aside className="w-64 bg-[#121824] border-r border-slate-800 flex flex-col shrink-0 hidden md:flex">
-        {/* Brand Header */}
-        <div className="h-16 px-6 flex items-center gap-3 border-b border-slate-800/80">
-          <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Shield className="w-4 h-4" />
-          </div>
-          <div>
-            <h2 className="font-bold text-sm text-white leading-tight">Cổng Quản Trị</h2>
-            <p className="text-[10px] text-slate-400">Kiểm Soát Hệ Thống</p>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <div className="p-4 space-y-1.5 flex-1">
-          <button
-            onClick={() => onNavigate('admin-users')}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
-          >
-            <Users className="w-4 h-4" />
-            <span>Quản Lý Người Dùng</span>
-          </button>
-
-          <button
-            onClick={() => onNavigate('admin-tokens')}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600/90 shadow-lg shadow-blue-600/20 border border-blue-500/30"
-          >
-            <Key className="w-4 h-4 text-blue-300" />
-            <span>Giám Sát Token</span>
-          </button>
-
-          <button
-            onClick={() => onNavigate('admin-audit')}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
-          >
-            <FileText className="w-4 h-4" />
-            <span>Nhật Ký Kiểm Tra</span>
-          </button>
-        </div>
-
-        {/* System Status Footer */}
-        <div className="p-4 border-t border-slate-800/80">
-          <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Trạng Thái Hệ Thống: Hoạt động</span>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 border-b border-slate-800 px-6 flex items-center justify-between gap-4 bg-[#121824]/60 backdrop-blur-md sticky top-0 z-30">
-          <span className="font-bold text-sm text-slate-300">Cổng Quản Trị / Giám Sát Token</span>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleRevokeAll}
-              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-600/20 flex items-center gap-2 transition-all"
-            >
-              <AlertOctagon className="w-4 h-4" />
-              <span>Thu Hồi Tất Cả Phiên</span>
-            </button>
-          </div>
-        </header>
-
-        <main className="p-6 space-y-6 max-w-7xl mx-auto w-full">
-          <div>
-            <h1 className="text-2xl font-black text-white tracking-tight mb-1">Sử Dụng Token & Phiên</h1>
-            <p className="text-xs text-slate-400">
-              Giám sát thời gian thực các thông tin xác thực và các phiên đang hoạt động.
-            </p>
-          </div>
-
-          {/* 4 Summary Metric Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-[#151B26] p-5 rounded-2xl border border-slate-800 space-y-1">
-              <p className="text-xs font-medium text-slate-400">Phiên Hoạt Động</p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-3xl font-black text-white">1,284</h2>
-                <span className="text-xs font-bold text-emerald-400">+12%</span>
-              </div>
-            </div>
-
-            <div className="bg-[#151B26] p-5 rounded-2xl border border-slate-800 space-y-1">
-              <p className="text-xs font-medium text-slate-400">Hết Hạn Hôm Nay</p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-3xl font-black text-white">432</h2>
-                <span className="text-xs text-slate-500 font-medium">Trung bình: 398</span>
-              </div>
-            </div>
-
-            <div className="bg-[#151B26] p-5 rounded-2xl border border-slate-800 space-y-1">
-              <p className="text-xs font-medium text-slate-400">Đã Thu Hồi (24 giờ)</p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-3xl font-black text-rose-400">89</h2>
-                <span className="text-xs text-slate-500 font-medium">Thủ công: 12</span>
-              </div>
-            </div>
-
-            <div className="bg-[#151B26] p-5 rounded-2xl border border-slate-800 space-y-1">
-              <p className="text-xs font-medium text-slate-400">TTL Trung Bình</p>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-3xl font-black text-white">4.2h</h2>
-                <span className="text-xs text-slate-500 font-medium">Mục tiêu: 4.8h</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Live Monitoring Table */}
-          <div className="bg-[#151B26] rounded-2xl border border-slate-800 p-6 space-y-5">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <h3 className="font-bold text-base text-white">Luồng Giám Sát Trực Tiếp</h3>
-
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <div className="relative flex-1 sm:w-72">
-                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Tìm ID tài khoản hoặc IP..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 bg-[#0B0E14] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-blue-500"
-                  />
-                </div>
-                <button className="p-2 bg-[#0B0E14] border border-slate-800 rounded-xl text-slate-400 hover:text-white">
-                  <Filter className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-[#0B0E14]/80 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider">
-                  <tr>
-                    <th className="py-3 px-4">ID Token</th>
-                    <th className="py-3 px-4">ID Tài Khoản</th>
-                    <th className="py-3 px-4">Sử Dụng Lần Cuối</th>
-                    <th className="py-3 px-4">Số Lượt Dùng</th>
-                    <th className="py-3 px-4">Trạng Thái</th>
-                    <th className="py-3 px-4">Siêu Dữ Liệu (Ẩn)</th>
-                    <th className="py-3 px-4 text-right">Hành Động</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800 text-slate-300 font-mono">
-                  {filtered.map((s) => (
-                    <tr key={s.tokenId} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-4 px-4 text-blue-400 font-semibold">{s.tokenId}</td>
-                      <td className="py-4 px-4 font-bold text-slate-200">{s.accountId}</td>
-                      <td className="py-4 px-4 text-slate-400">{s.lastUsed}</td>
-                      <td className="py-4 px-4 font-bold text-slate-200">{s.usageCount.toLocaleString('vi-VN')}</td>
-                      <td className="py-4 px-4">
-                        {s.status === 'ĐANG HOẠT ĐỘNG' && (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-950/80 text-emerald-400 border border-emerald-800">
-                            ĐANG HOẠT ĐỘNG
-                          </span>
-                        )}
-                        {s.status === 'ĐÃ THU HỒI' && (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-950/80 text-rose-400 border border-rose-800">
-                            ĐÃ THU HỒI
-                          </span>
-                        )}
-                        {s.status === 'ĐÃ HẾT HẠN' && (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-800 text-slate-400 border border-slate-700">
-                            ĐÃ HẾT HẠN
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-4 px-4 text-slate-400 text-[11px]">{s.metadata}</td>
-                      <td className="py-4 px-4 text-right">
-                        {s.canRevoke ? (
-                          <button
-                            onClick={() => handleRevoke(s.tokenId)}
-                            className="text-rose-400 font-bold hover:underline"
-                          >
-                            Thu Hồi Phiên
-                          </button>
-                        ) : (
-                          <span className="text-slate-500 font-normal">
-                            {s.status === 'ĐÃ THU HỒI' ? 'Đã Chốt' : 'Hệ Thống Đã Xóa'}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex items-center justify-between text-xs text-slate-500 pt-3 border-t border-slate-800">
-              <span>Đang hiển thị 1-5 trong số 1,284 mục</span>
-              <div className="flex gap-2">
-                <button className="px-3 py-1 bg-[#0B0E14] border border-slate-800 rounded-lg text-slate-400 hover:text-white">Trước</button>
-                <button className="px-3 py-1 bg-[#0B0E14] border border-slate-800 rounded-lg text-slate-400 hover:text-white">Sau</button>
-              </div>
-            </div>
-          </div>
-        </main>
-      </div>
-    </div>
-  );
-};
+function DateRange({ from, to, setFrom, setTo, onApply }: { from: string; to: string; setFrom: (value: string) => void; setTo: (value: string) => void; onApply: () => void }) { return <div className="flex flex-wrap items-end gap-3"><label className="text-xs text-slate-400">Từ<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="input mt-1" /></label><label className="text-xs text-slate-400">Đến<input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="input mt-1" /></label><button onClick={onApply} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold">Áp dụng</button></div>; }
+function ConfigForm({ config, newKey, loading, saving, testing, onChange, onKeyChange, onSave, onTest }: { config: AdminAiConfig | null; newKey: string; loading: boolean; saving: boolean; testing: boolean; onChange: (config: AdminAiConfig) => void; onKeyChange: (value: string) => void; onSave: () => void; onTest: () => void }) { if (loading || !config) return <p className="text-slate-400">Đang tải cấu hình…</p>; const field = (key: keyof AdminAiConfig, label: string, type = 'text') => <label className="block text-sm text-slate-300">{label}<input type={type} value={String(config[key] ?? '')} onChange={(e) => onChange({ ...config, [key]: type === 'number' ? Number(e.target.value) : e.target.value })} className="input mt-1 w-full" /></label>; return <div className="max-w-3xl space-y-4 rounded-2xl border border-slate-800 bg-[#151b26] p-6"><div className="grid gap-4 md:grid-cols-2">{field('provider', 'Provider')}{field('model', 'Model')}{field('baseUrl', 'Base URL')}{field('responsesPath', 'Responses path')}{field('timeoutSeconds', 'Timeout (giây)', 'number')}</div><div className="rounded-xl border border-slate-700 bg-black/20 p-4 text-sm"><p>API key hiện tại: <strong>{config.apiKeyConfigured ? config.maskedApiKey || 'Đã cấu hình' : 'Chưa cấu hình'}</strong></p><input type="password" autoComplete="new-password" value={newKey} onChange={(e) => onKeyChange(e.target.value)} placeholder="API key mới (để trống để giữ key hiện tại)" className="input mt-3 w-full" /><p className="mt-2 text-xs text-slate-400">Key mới chỉ tồn tại trong form và sẽ được xóa sau khi lưu.</p></div><div className="flex flex-wrap gap-3"><button disabled={saving} onClick={onSave} className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />{saving ? 'Đang lưu…' : 'Lưu cấu hình'}</button><button disabled={testing} onClick={onTest} className="flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm disabled:opacity-50"><Send className="h-4 w-4" />{testing ? 'Đang kiểm tra…' : 'Test kết nối'}</button></div><p className="text-xs text-slate-400">Test gửi một request nhỏ tới provider và có thể tiêu thụ token.</p></div>; }
+function UsageTable({ usage, loading, onPage }: { usage: AiUsagePage; loading: boolean; onPage: (page: number) => void }) { const pages = Math.max(1, Math.ceil(usage.total / usage.pageSize)); return <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#151b26]"><div className="overflow-x-auto"><table className="w-full min-w-[950px] text-left text-sm"><thead className="border-b border-slate-800 text-xs uppercase text-slate-400"><tr><th className="p-4">Thời gian</th><th className="p-4">Provider / model</th><th className="p-4">Operation</th><th className="p-4">Tokens</th><th className="p-4">Độ trễ</th><th className="p-4">Trạng thái</th><th className="p-4">Lỗi</th></tr></thead><tbody className="divide-y divide-slate-800">{loading ? <tr><td colSpan={7} className="p-8 text-center text-slate-400">Đang tải lịch sử…</td></tr> : usage.items.length === 0 ? <tr><td colSpan={7} className="p-8 text-center text-slate-400">Chưa có request phù hợp.</td></tr> : usage.items.map((item) => <tr key={item.id}><td className="p-4 text-xs text-slate-400">{date(item.createdAt)}</td><td className="p-4"><p>{item.provider}</p><p className="text-xs text-slate-400">{item.model}</p></td><td className="p-4">{item.operation}</td><td className="p-4">{item.inputTokens.toLocaleString()} / {item.outputTokens.toLocaleString()} / <strong>{item.totalTokens.toLocaleString()}</strong></td><td className="p-4">{item.latencyMs} ms</td><td className="p-4"><span className={item.status === 'Succeeded' ? 'text-emerald-300' : 'text-rose-300'}>{item.status}</span></td><td className="p-4 text-xs text-slate-400">{item.errorCode || '—'}</td></tr>)}</tbody></table></div><footer className="flex items-center justify-between border-t border-slate-800 p-4 text-sm text-slate-400"><span>Trang {usage.page}/{pages} · {usage.total} request</span><div className="flex gap-2"><button disabled={usage.page === 1 || loading} onClick={() => onPage(usage.page - 1)} className="rounded-lg border border-slate-700 p-2 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><button disabled={usage.page >= pages || loading} onClick={() => onPage(usage.page + 1)} className="rounded-lg border border-slate-700 p-2 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div></footer></div>; }
