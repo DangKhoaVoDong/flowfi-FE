@@ -369,7 +369,7 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
           </p>
 
           {/* Top 3 Summary Cards */}
-          <div className="grid md:grid-cols-3 gap-5">
+          <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-5">
             {/* Primary Blue Card */}
             <div className="bg-gradient-to-br from-blue-600 to-blue-700 text-white p-6 rounded-2xl shadow-lg shadow-blue-500/15 relative overflow-hidden flex flex-col justify-between min-h-[140px]">
               <WalletIcon className="w-24 h-24 text-white/10 absolute -right-4 -bottom-4 pointer-events-none" />
@@ -439,6 +439,21 @@ export const UserDashboardScreen: React.FC<UserDashboardScreenProps> = ({ onNavi
                     </p>
                   </div>
                 )}
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between min-h-[140px]">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-slate-500">Dòng tiền ròng</p>
+                <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <DollarSign className="w-4 h-4" />
+                </div>
+              </div>
+              <div>
+                <h2 className={`text-2xl font-bold ${(summary?.netSaving ?? 0) >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                  {isLoading ? '...' : (summary?.netSaving || 0).toLocaleString('vi-VN')} đ
+                </h2>
+                <p className="mt-3 text-[11px] text-slate-400">Thu nhập trừ chi tiêu trong kỳ</p>
               </div>
             </div>
           </div>

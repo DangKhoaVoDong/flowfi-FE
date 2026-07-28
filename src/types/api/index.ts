@@ -266,6 +266,7 @@ export interface CreateBudgetRequest {
   name: string;
   month: number;
   year: number;
+  totalTargetAmount?: number;
   warningThresholdPercent?: number;
   currencyCode?: string;
   targets: BudgetTargetRequest[];
@@ -349,6 +350,89 @@ export interface UpdateNotificationPreferenceRequest {
   monthlySummary?: boolean;
   savingsTip?: boolean;
   timezone?: string;
+}
+
+export interface BudgetMonthCardDto {
+  month: number;
+  year: number;
+  hasBudget: boolean;
+  budgetId?: string;
+  budgetName?: string;
+  totalTargetAmount: number;
+  spentAmount: number;
+  remainingAmount: number;
+  usagePercent: number;
+  status?: string;
+  targetCount: number;
+}
+
+export interface BudgetDailyTrendDto {
+  date: string;
+  dailyExpense: number;
+  cumulativeExpense: number;
+  idealCumulativeExpense: number;
+  projectedCumulativeExpense: number;
+}
+
+export interface UnbudgetedExpenseDto {
+  tagId?: string;
+  categoryName: string;
+  spentAmount: number;
+  transactionCount: number;
+}
+
+export interface MonthlyBudgetSummaryDto {
+  id: string;
+  month: number;
+  year: number;
+  currencyCode: string;
+  targetAmount: number;
+  spentAmount: number;
+  remainingAmount: number;
+  percentUsed: number;
+  warningThresholdPercent: number;
+  transactionCount: number;
+  remainingDays: number;
+  safeDailyAmount: number;
+  averageDailyExpense: number;
+  projectedExpense: number;
+  timeElapsedPercent: number;
+  status: 'NOT_STARTED' | 'ON_TRACK' | 'ATTENTION' | 'AT_RISK' | 'EXCEEDED' | 'COMPLETED';
+  updatedAt?: string;
+}
+
+export interface MonthlyBudgetOverviewDto {
+  summary: MonthlyBudgetSummaryDto;
+  allocations: BudgetTargetDetailsDto[];
+  dailyTrend: BudgetDailyTrendDto[];
+  unbudgetedExpenses: UnbudgetedExpenseDto[];
+}
+
+export interface FinancialGoalDto {
+  id: string;
+  name: string;
+  description?: string;
+  targetAmount: number;
+  currentAmount: number;
+  progressPercent: number;
+  remainingAmount: number;
+  currencyCode: string;
+  deadline?: string;
+  walletId?: string;
+  status: 'Active' | 'Completed' | 'Cancelled';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinancialGoalRequest {
+  name: string;
+  description?: string;
+  targetAmount: number;
+  currentAmount: number;
+  currencyCode: string;
+  deadline?: string;
+  walletId?: string;
+  status: 'Active' | 'Completed' | 'Cancelled';
 }
 
 // AI Processing DTOs

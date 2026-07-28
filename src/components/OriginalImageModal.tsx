@@ -41,6 +41,11 @@ export const OriginalImageModal: React.FC<OriginalImageModalProps> = ({
       title: 'FlowFi - Nhắc trả nợ (VNĐ)',
       desc: 'Theo dõi khoản nợ, kỳ trả, ngày đến hạn và thao tác đánh dấu đã trả hoặc bỏ qua từng kỳ.'
     },
+    wallets: { title: 'FlowFi - Ví', desc: 'Quản lý các nguồn tiền và số dư theo loại tiền tệ.' },
+    goals: { title: 'FlowFi - Mục tiêu tài chính', desc: 'Theo dõi tiến độ các mục tiêu tài chính cá nhân.' },
+    reports: { title: 'FlowFi - Báo cáo & Insights', desc: 'Phân tích xu hướng thu, chi và dòng tiền.' },
+    notifications: { title: 'FlowFi - Thông báo', desc: 'Trung tâm cảnh báo và cập nhật tài chính.' },
+    settings: { title: 'FlowFi - Cài đặt', desc: 'Quản lý hồ sơ và tùy chọn cá nhân.' },
     'admin-tokens': {
       title: 'FlowFi Admin - Giám sát Token & Session (VNĐ)',
       desc: 'Cổng quản trị tối màu giám sát phiên hoạt động, TTL trung bình, thu hồi token trực tiếp và luồng giám sát thời gian thực.'
