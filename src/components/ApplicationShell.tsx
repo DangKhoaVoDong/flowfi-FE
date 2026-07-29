@@ -12,13 +12,12 @@ import {
   Plus,
   Search,
   Settings,
-  BarChart3,
-  Target,
   WalletCards,
   X,
   Crown,
   ChevronDown,
   ImagePlus,
+  LogOut,
   PencilLine,
   Sparkles,
 } from 'lucide-react';
@@ -37,8 +36,6 @@ const navigation = [
   { id: 'wallets' as ScreenId, label: 'Ví', icon: WalletCards },
   { id: 'budget' as ScreenId, label: 'Ngân sách', icon: PieChart },
   { id: 'debt-reminders' as ScreenId, label: 'Nhắc nợ', icon: CalendarClock },
-  { id: 'goals' as ScreenId, label: 'Mục tiêu', icon: Target },
-  { id: 'reports' as ScreenId, label: 'Báo cáo', icon: BarChart3 },
 ];
 
 const pageNames: Partial<Record<ScreenId, string>> = {
@@ -60,24 +57,52 @@ export function ApplicationShell({
   onNavigate,
   children,
 }: ApplicationShellProps) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const closeMenu = (event: MouseEvent) => {
       if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false);
+      if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false);
     };
+    const closeMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setAddMenuOpen(false);
+        setAccountMenuOpen(false);
+      }
+    };
+
     document.addEventListener('mousedown', closeMenu);
-    return () => document.removeEventListener('mousedown', closeMenu);
+    document.addEventListener('keydown', closeMenuOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeMenu);
+      document.removeEventListener('keydown', closeMenuOnEscape);
+    };
   }, []);
 
   const navigate = (screen: ScreenId) => {
     onNavigate(screen);
     setDrawerOpen(false);
     setAddMenuOpen(false);
+    setAccountMenuOpen(false);
+  };
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+
+    setIsLoggingOut(true);
+    try {
+      await logout();
+    } finally {
+      setIsLoggingOut(false);
+      setAccountMenuOpen(false);
+    }
   };
 
   const sidebar = (
@@ -212,17 +237,45 @@ export function ApplicationShell({
               <Bell />
               <span className="flowfi-notification-dot" />
             </button>
-            <div className="flowfi-user">
-              {user?.avatarUrl ? (
-                <img src={user.avatarUrl} alt="" />
-              ) : (
-                <span>{user?.fullName?.charAt(0)?.toUpperCase() || 'U'}</span>
+            <div className="flowfi-account" ref={accountMenuRef}>
+              <button
+                type="button"
+                className="flowfi-user"
+                onClick={() => setAccountMenuOpen((value) => !value)}
+                aria-label="Mở menu tài khoản"
+                aria-haspopup="menu"
+                aria-expanded={accountMenuOpen}
+              >
+                {user?.avatarUrl ? (
+                  <img src={user.avatarUrl} alt="" />
+                ) : (
+                  <span>{user?.fullName?.charAt(0)?.toUpperCase() || 'U'}</span>
+                )}
+                <div>
+                  <strong>{user?.fullName || 'Người dùng FlowFi'}</strong>
+                  <small>{user?.email || 'Tài khoản cá nhân'}</small>
+                </div>
+                <ChevronDown />
+              </button>
+
+              {accountMenuOpen && (
+                <div className="flowfi-account-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => navigate('settings')}>
+                    <Settings />
+                    <span>Cài đặt</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="danger"
+                    onClick={handleLogout}
+                    disabled={isLoggingOut}
+                  >
+                    <LogOut />
+                    <span>{isLoggingOut ? 'Đang đăng xuất...' : 'Đăng xuất'}</span>
+                  </button>
+                </div>
               )}
-              <div>
-                <strong>{user?.fullName || 'Người dùng FlowFi'}</strong>
-                <small>{user?.email || 'Tài khoản cá nhân'}</small>
-              </div>
-              <ChevronRight />
             </div>
           </div>
         </header>

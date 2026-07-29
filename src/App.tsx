@@ -57,6 +57,8 @@ function AppContent() {
   useEffect(() => {
     if (!isAuthenticated && !isLoading && prevAuthRef.current === true) {
       prevAuthRef.current = false;
+      window.history.replaceState({ screen: 'landing' }, '', pathForScreen('landing'));
+      setCurrentScreen('landing');
     }
   }, [isAuthenticated, isLoading]);
 

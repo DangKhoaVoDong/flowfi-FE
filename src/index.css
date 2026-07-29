@@ -86,13 +86,32 @@ button { cursor: pointer; }
 .flowfi-icon-button { position: relative; width: 40px; height: 40px; display: grid; place-items: center; color: #66705f; background: #fffdf9; border: 1px solid rgba(98, 129, 65, .16); border-radius: 11px; }
 .flowfi-icon-button svg { width: 18px; }
 .flowfi-notification-dot { position: absolute; top: 8px; right: 8px; width: 6px; height: 6px; border: 2px solid #fffdf9; border-radius: 50%; background: #e09b1a; }
-.flowfi-user { display: flex; align-items: center; gap: 9px; padding-left: 5px; }
+.flowfi-account { position: relative; }
+.flowfi-user {
+  display: flex; align-items: center; gap: 9px; padding: 4px 5px;
+  color: inherit; background: transparent; border: 0; border-radius: 12px;
+}
+.flowfi-user:hover, .flowfi-user:focus-visible { background: rgba(98, 129, 65, .08); outline: 0; }
 .flowfi-user > span, .flowfi-user img { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 11px; object-fit: cover; color: #fff; background: #7c965e; font-size: 13px; font-weight: 800; }
 .flowfi-user div { display: flex; flex-direction: column; max-width: 150px; }
 .flowfi-user strong, .flowfi-user small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flowfi-user strong { font-size: 11px; }
 .flowfi-user small { margin-top: 2px; color: #8b9286; font-size: 9px; }
 .flowfi-user > svg { width: 13px; color: #92998e; }
+.flowfi-account-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: 188px; padding: 6px;
+  background: #fff; border: 1px solid rgba(98, 129, 65, .14); border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(27, 33, 26, .14);
+}
+.flowfi-account-menu button {
+  width: 100%; min-height: 39px; padding: 0 10px; display: flex; align-items: center; gap: 10px;
+  color: #475467; background: transparent; border: 0; border-radius: 8px; font-size: 12px; font-weight: 650;
+}
+.flowfi-account-menu button:hover, .flowfi-account-menu button:focus-visible { color: #5147e5; background: #f1efff; outline: 0; }
+.flowfi-account-menu button.danger { color: #b42318; }
+.flowfi-account-menu button.danger:hover, .flowfi-account-menu button.danger:focus-visible { background: #fef3f2; }
+.flowfi-account-menu button:disabled { opacity: .6; cursor: wait; }
+.flowfi-account-menu svg { width: 16px; height: 16px; }
 .flowfi-mobile-menu { display: none; padding: 7px; color: #4d5a47; background: transparent; border: 0; }
 .flowfi-mobile-menu svg { width: 21px; }
 .flowfi-shell-content { min-width: 0; }
@@ -140,7 +159,7 @@ button { cursor: pointer; }
   .flowfi-header-title strong { font-size: 14px; }
   .flowfi-search { width: 40px; padding: 0; justify-content: center; border: 0; background: transparent; }
   .flowfi-search input, .flowfi-search kbd { display: none; }
-  .flowfi-user { display: none; }
+  .flowfi-user { display: flex; padding: 2px; }
   .flowfi-shell-content > div { min-height: calc(100vh - 62px) !important; }
   .flowfi-shell-content main { padding: 16px !important; }
   .flowfi-drawer-layer { position: fixed; inset: 0; z-index: 100; display: block; }
